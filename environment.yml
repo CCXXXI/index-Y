@@ -2,3 +2,4 @@
 name: index-y
 dependencies:
   - python
+  - tqdm
