@@ -19,7 +19,7 @@ jobs:
               cd "$vol" && zip -r "../../build/${stem}.epub" *
             )
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           path: build
           compression-level: 0
