@@ -3,6 +3,8 @@ on: push
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -23,4 +25,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: build
+          files: build/*
