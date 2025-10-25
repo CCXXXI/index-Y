@@ -1,10 +1,15 @@
+import re
 import shutil
 from pathlib import Path
 
 from tqdm import tqdm
 
+fixes = (("所(?=占据)", ""),)
+
 
 def fixed(content: str) -> str:
+    for old, new in fixes:
+        content = re.sub(old, new, content)
     return content
 
 
