@@ -8,15 +8,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          sparse-checkout: 'Y'
       - name: zip
         run: |
           mkdir build
           for vol in Y/*/ ; do
             stem=$(basename "$vol")
             (
-              cd "$vol" && zip -9r "../../build/${stem}.epub" *
+              cd "$vol" && zip -r "../../build/${stem}.epub" *
             )
           done
       - uses: actions/upload-artifact@v4
         with:
           path: build
+          compression-level: 0
