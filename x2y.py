@@ -1,4 +1,3 @@
-import re
 import shutil
 from pathlib import Path
 
@@ -9,7 +8,7 @@ def x2y():
     x, y = Path("X"), Path("Y")
     shutil.rmtree(y)
     for vol in tqdm(list(x.iterdir())):
-        shutil.copytree(vol, y / re.sub("X$", "Y", vol.name))
+        shutil.copytree(vol, y / vol.name)
 
 
 if __name__ == "__main__":
