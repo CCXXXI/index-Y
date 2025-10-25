@@ -4,7 +4,10 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-fixes = (("所(?=占据)", ""),)
+fixes = (
+    ("所(?=占据)", ""),
+    ("(?<=体积减)少", "小"),
+)
 
 
 def fixed(content: str) -> str:
