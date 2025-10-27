@@ -5,6 +5,7 @@ import regex as re
 from tqdm import tqdm
 
 fixes = (
+    ("覧", "览"),
     ("自于", "自"),
     ("人型", "人形"),
     ("吵杂", "嘈杂"),
