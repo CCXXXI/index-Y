@@ -79,10 +79,12 @@ def x2y():
     shutil.rmtree(y)
     for vol in tqdm(list(x.iterdir())):
         shutil.copytree(vol, y / vol.name)
-        for xhtml in (y / vol.name).rglob("*.xhtml"):
-            with open(xhtml, "r", encoding="utf-8") as f:
+        for file in (y / vol.name).rglob("*"):
+            if file.suffix not in (".xhtml", ".opf", ".ncx"):
+                continue
+            with open(file, "r", encoding="utf-8") as f:
                 content = f.read()
-            with open(xhtml, "w", encoding="utf-8") as f:
+            with open(file, "w", encoding="utf-8") as f:
                 f.write(fixed(content))
 
 

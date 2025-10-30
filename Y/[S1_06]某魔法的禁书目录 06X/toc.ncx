@@ -37,7 +37,7 @@
     </navPoint>
     <navPoint id="num_5" playOrder="5">
       <navLabel>
-        <text>第一章 开学式 Baby_Queen.</text>
+        <text>第一章 开学典礼 Baby_Queen.</text>
       </navLabel>
       <content src="OEBPS/Text/S1_06-02_Chapter1.xhtml"/>
       <navPoint id="num_6" playOrder="6">
