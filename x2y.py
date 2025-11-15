@@ -7,6 +7,7 @@ from tqdm import tqdm
 fixes: dict[str, list[tuple[str, str]]] = {
     "*": [
         ("又再", "再"),
+        ("诸于", "之于"),
         ("塑胶", "塑料"),
         ("荧幕", "屏幕"),
         ("人型", "人形"),
