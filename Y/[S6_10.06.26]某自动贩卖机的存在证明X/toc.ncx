@@ -8,7 +8,7 @@
     <meta name="dtb:maxPageNumber" content="0"/>
   </head>
   <docTitle>
-    <text>某自动贩卖机的存在证明X</text>
+    <text>某自动售货机的存在证明X</text>
   </docTitle>
   <navMap>
     <navPoint id="num_1" playOrder="1">
@@ -25,7 +25,7 @@
     </navPoint>
     <navPoint id="num_3" playOrder="3">
       <navLabel>
-        <text>某自动贩卖机的存在证明FANFARE</text>
+        <text>某自动售货机的存在证明FANFARE</text>
       </navLabel>
       <content src="OEBPS/Text/S6_10.06.26-Chapter.xhtml"/>
     </navPoint>
