@@ -9,7 +9,7 @@
 
 ## 下载
 
-打包好的 epub 文件可以在 [Releases](https://github.com/CCXXXI/index-Y/releases) 下载。
+打包好的 epub 文件可以在 [Releases](https://github.com/CCXXXI/index-Y/releases/latest) 下载。
 
 受 GitHub 限制，上传的文件无法保留中文名，如有需要可下载 zip 文件。
 
