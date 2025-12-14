@@ -132,7 +132,7 @@ fixes: dict[str, list[tuple[str, str]]] = {
     "[S1_03]某魔法的禁书目录 03X": [
         ("参了各种营养剂", "掺了各种营养剂"),
         ("改良于海湾战争中", "在海湾战争中改良"),
-        ("这把狙击枪因为", "因为这把狙击枪"),
+        ("这把狙击枪由于", "因为这把狙击枪"),
         ("子弹弹壳", "子弹壳"),
         ("连发机能", "连发功能"),
         ("中性子", "中子"),
@@ -240,7 +240,7 @@ fixes: dict[str, list[tuple[str, str]]] = {
 
 
 def fixed(vol: str, content: str) -> str:
-    for old, new in fixes["*"] + (fixes[vol] if vol in fixes else []):
+    for old, new in (fixes[vol] if vol in fixes else []) + fixes["*"]:
         content = re.sub(old, new, content)
     return content
 
