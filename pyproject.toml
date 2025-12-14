@@ -1,0 +1,10 @@
+[project]
+name = "index-Y"
+version = "1.0.0"
+description = "禁书目录 X 系列的 AI 校对版。"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "regex>=2025.11.3",
+    "tqdm>=4.67.1",
+]
