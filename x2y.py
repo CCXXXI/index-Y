@@ -308,7 +308,7 @@ fixes: dict[str, list[tuple[str, str]]] = {
 
 
 def fixed(vol: str, content: str) -> str:
-    for old, new in (fixes[vol] if vol in fixes else []) + fixes["*"]:
+    for old, new in fixes.get(vol, []) + fixes["*"]:
         content = re.sub(old, new, content)
     return content
 
