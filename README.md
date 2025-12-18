@@ -3,7 +3,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/ccxxxi/index-Y)](https://github.com/CCXXXI/index-Y/commits)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-%23FE5196?logo=conventionalcommits&logoColor=white)](https://conventionalcommits.org)
 [![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)](https://www.python.org)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 [禁书目录 X 系列](https://github.com/1204244136/index-X) 的 AI 校对版。
 
