@@ -628,6 +628,7 @@ fixes: dict[str, list[tuple[str, str]]] = {
             "明明和滨面他们用同样的速度穿越森林的<ruby>驱动铠<rt>Powered Suit</rt></ruby>，像是",
             "<ruby>驱动铠<rt>Powered Suit</rt></ruby>明明和滨面他们用同样的速度穿越森林，却像是",
         ),
+        ("不仅在被雪覆盖的疾驰", "不仅在雪地疾驰"),
     ],
     "[S1_24]某魔法的禁书目录 22X": [],
     "[S1_25]某魔法的禁书目录 SPX": [
