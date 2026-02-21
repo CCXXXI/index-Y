@@ -133,7 +133,7 @@
     </navPoint>
     <navPoint id="num_21" playOrder="21">
       <navLabel>
-        <text>行间八</text>
+        <text>行间　八</text>
       </navLabel>
       <content src="OEBPS/Text/S1_24-07_Between_the_Lines8.xhtml"/>
     </navPoint>
