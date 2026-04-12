@@ -22,6 +22,6 @@ jobs:
             )
           done
           zip -j "build/index-Y-${GITHUB_REF_NAME}.zip" build/*
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: build/*
