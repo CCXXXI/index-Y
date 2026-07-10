@@ -140,8 +140,8 @@
     <item id="nav" href="../nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="toc" href="../toc.ncx" media-type="application/x-dtbncx+xml"/>
     <item href="Styles/style.css" id="id5" media-type="text/css"/>
-    <item id="GT_vol_1.jpg" href="Images/Cover.jpg" media-type="image/jpeg" properties="cover-image"/>
-    <item id="id" href="Images/p1.jpg" media-type="image/jpeg"/>
+    <item id="GT_vol_1.jpg" href="Images/S6_14.09.10-Cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+    <item id="id" href="Images/S6_14.09.10-p1.jpg" media-type="image/jpeg"/>
   </manifest>
   <spine toc="toc">
     <itemref idref="S6_14.09.10-Cover.xhtml"/>
