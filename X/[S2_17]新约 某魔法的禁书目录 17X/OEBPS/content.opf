@@ -177,6 +177,7 @@
     <item id="id22" href="Images/S2_17-i-373.jpg" media-type="image/jpeg"/>
     <item id="id23" href="Images/S2_17-i-433.jpg" media-type="image/jpeg"/>
     <item id="id24" href="Images/S2_17-i-457.jpg" media-type="image/jpeg"/>
+    <item id="id-2" href="Text/S2_17-Special.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine toc="toc">
     <itemref idref="S2_17-Cover.xhtml"/>
@@ -194,6 +195,7 @@
     <itemref idref="id13"/>
     <itemref idref="id14"/>
     <itemref idref="id17"/>
+    <itemref idref="id-2"/>
     <itemref idref="id30"/>
   </spine>
 </package>

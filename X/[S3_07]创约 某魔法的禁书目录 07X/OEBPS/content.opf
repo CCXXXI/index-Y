@@ -173,7 +173,7 @@
     <item id="id16" href="Images/S3_07-i-298-299.jpg" media-type="image/jpeg"/>
     <item id="id17" href="Images/S3_07-i-307.jpg" media-type="image/jpeg"/>
     <item id="id18" href="Images/S3_07-i-337.jpg" media-type="image/jpeg"/>
-    <item href="OEBPS/S3_07-Cover.jpg" id="cover" media-type="image/jpeg" properties="cover-image"/>
+    <item href="Images/S3_07-Cover.jpg" id="cover" media-type="image/jpeg" properties="cover-image"/>
   </manifest>
   <spine toc="ncx">
     <itemref idref="id5"/>
