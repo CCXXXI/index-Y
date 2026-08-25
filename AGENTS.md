@@ -26,7 +26,7 @@
 2. 图片引用更新（opf/xhtml 中的 href/src，单个 commit）
 3. 纯格式化变更（不影响文本显示，单个 commit）
 4. 版式调整（结构/属性变化但文本不变，单个 commit）
-5. 文本改动逐文件分流：类别 1 每个文件一个 commit（X/Y 成对提交），类别 2/3 留下
+5. 文本改动按块分流：类别 1 块每文件一个 commit（X/Y 成对，只应用类别 1 块），类别 2/3 块留在工作区
 
 详细的判定逻辑、脚本模式与 git 操作坑见 [docs/sync-triage.md](docs/sync-triage.md)。
 
