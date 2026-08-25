@@ -2,6 +2,21 @@
 
 本文记录「新 X 入仓 + 重跑 x2y.py 后」把海量改动分流为有序 commits 的完整方法。2026-08 首次实测，约 2100 项改动拆为 110 个 commits。
 
+**各批次已固化为脚本，按顺序运行即可（本文档是其原理与判定标准的说明）：**
+
+```bash
+uv run python scripts/check_y_freshness.py      # 前置校验：Y == x2y(X)
+uv run python scripts/s1_commit_image_renames.py
+uv run python scripts/s2_commit_image_refs.py
+uv run python scripts/s3_commit_pure_formatting.py
+uv run python scripts/s4_commit_layout.py
+uv run python scripts/s5_triage_text.py          # 导出审查材料（不提交）
+# 人工/AI 审查 review_changes.txt，可疑改动写入 triage_exclude.json
+uv run python scripts/s5_triage_text.py --commit # 提交通过的类别 1
+```
+
+s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在 `%LOCALAPPDATA%\index-Y-triage\`。
+
 ## 0. 前置校验：Y 必须与当前 X 同步
 
 **分流前先确认 Y 是由当前 X 生成的**，否则整个分类会系统性失真（2026-08 实测踩坑：忘记重跑 x2y.py 导致 Y 滞后一个上游版本）。
