@@ -230,6 +230,83 @@ def raw_variants(chunk: str) -> list[str]:
             chunk.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")]
 
 
+def aligned_chunks(old: bytes, new: bytes):
+    """raw 文本块对齐。有增删（非 1:1 replace）返回 None，否则返回 (oc, nc, ops)。"""
+    oc, nc = text_chunks(old), text_chunks(new)
+    on, nn = [norm_ws(c) for c in oc], [norm_ws(c) for c in nc]
+    sm = difflib.SequenceMatcher(a=on, b=nn, autojunk=False)
+    ops = sm.get_opcodes()
+    for tag, i1, i2, j1, j2 in ops:
+        if tag != "equal" and (tag != "replace" or (i2 - i1) != (j2 - j1)):
+            return None
+    return oc, nc, ops
+
+
+def apply_frags(o: str, n: str, keep_frags: set[tuple[str, str]]) -> str:
+    """「o 只应用 keep_frags 中的片段改动」的文本（norm 级，供校验用）。"""
+    sm = difflib.SequenceMatcher(a=o, b=n, autojunk=False)
+    out = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            out.append(o[i1:i2])
+        else:
+            a, b = o[i1:i2], n[j1:j2]
+            out.append(b if (a, b) in keep_frags else a)
+    return "".join(out)
+
+
+def apply_blocks(old: bytes, new: bytes,
+                 keep: set[tuple[str, str]],
+                 partial: dict | None = None) -> str | None:
+    """「new 内容，但把不在 keep 中的改动还原」的中间版本。
+
+    keep 为 norm_ws 的 (旧块, 新块) 集合（chunk_changes 的元素），整块保留。
+    partial 为 {(旧块, 新块): 需还原的 (旧片段, 新片段) 集合}——混合块只还原
+    类别 2/3 片段，类别 1 片段仍然应用（片段级拆分）。
+    块或片段在文件中定位歧义时返回 None（调用方应整文件留审）。
+    """
+    partial = partial or {}
+    aligned = aligned_chunks(old, new)
+    if aligned is None:
+        return None
+    oc, nc, ops = aligned
+    on, nn = [norm_ws(c) for c in oc], [norm_ws(c) for c in nc]
+    staged = new.decode("utf-8")
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            continue
+        for oi, nj in zip(range(i1, i2), range(j1, j2)):
+            key = (on[oi], nn[nj])
+            if key in keep:
+                continue
+            nvs = raw_variants(nc[nj])
+            hit = next((k for k, v in enumerate(nvs) if staged.count(v) == 1),
+                       None)
+            if hit is None:
+                return None
+            if key in partial:
+                # 片段级还原：在 raw 新块中把类别 2/3 的新片段换回旧片段；
+                # 片段定位失败则退化为整块还原（不提交该块的类别 1 部分，安全）
+                s, ok = nvs[hit], True
+                for a, b in partial[key]:
+                    bvs, avs = raw_variants(b), raw_variants(a)
+                    k = next((i for i, v in enumerate(bvs)
+                              if v and s.count(v) == 1), None)
+                    if k is None:
+                        ok = False
+                        break
+                    s = s.replace(bvs[k], avs[k], 1)
+                if ok:
+                    staged = staged.replace(nvs[hit], s, 1)
+                else:
+                    staged = staged.replace(nvs[hit],
+                                            raw_variants(oc[oi])[hit], 1)
+            else:
+                ovs = raw_variants(oc[oi])
+                staged = staged.replace(nvs[hit], ovs[hit], 1)
+    return staged
+
+
 def revert_text_chunks(old_text: str, new_text: str) -> str | None:
     """返回「新结构 + 旧文本」的中间版本；无法安全还原（文本增删/定位歧义）返回 None。
 

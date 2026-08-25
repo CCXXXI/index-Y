@@ -1,16 +1,30 @@
-"""批次 5：文本改动逐文件分流（类别 1 每文件一个 commit）。
+"""批次 5：文本改动按【改动块】分流（类别 1 提交，类别 2/3 留下）。
 
-分类（按相对路径配对 X/<rel> 与 Y/<rel>，块级提取 + 片段级比较）：
-- same       两侧改动集一致 → 类别 1 候选
-- diff       块级不一致但片段级一致 → 类别 1 候选（旧 Y 同句含规则改写）
-- x_only     类别 3（上游做了规则已覆盖的改动）→ 留下
-- complex    文本增删/对齐失败 → 留下
-- 其余        疑类别 2 → 留下
+分类（按相对路径配对 X/<rel> 与 Y/<rel>）：
+1. 两侧各自提取相对 HEAD 的文本改动（文本块级 difflib，仅接受 1:1 replace）。
+2. 旧 X 与旧 Y 的文本块序列做【位置对齐】（1:1，允许旧 Y 被规则改写），
+   把两侧改动配成「同位置块对」。位置对齐失败 → 复杂，整文件留下。
+3. 逐块对分类（F() = 块内最小差异片段集）：
+   - 两侧都有改动且 F(x) == F(y)          → 类别 1 候选对
+   - 两侧都有改动且 F(x) ⊃ F(y)，X 多出的片段能被 x2y 规则解释（收敛）
+                                           → 混合块对：Y 块类别 1 整块提交；
+                                             X 侧片段级拆分，类别 1 片段提交、
+                                             类别 3 片段留下（两侧提交保持对称，
+                                             HEAD 上 x2y(X) == Y 不变式不被破坏）
+   - 仅 X 有改动且能收敛                   → 类别 3（留下）
+   - 其余（Y 有多余片段 / 仅 Y 有改动 / 不收敛）→ 疑类别 2（留下）
+   片段级比较是必要的：旧 Y 的同一句子可能已被 x2y 规则改过，
+   块字面不同不代表改动不同；但只做全局片段集比较会把「同碎片的另一处
+   规则采纳改动」误判为类别 1（实测踩坑），所以必须先按位置配对。
+
+提交粒度为块而非文件：用 apply_blocks 构造「只应用类别 1 块」的中间版本提交，
+类别 2/3 块与被排除块留在工作区。排除（triage_exclude.json）按块对生效：
+任一侧块命中排除则整对留下。每文件一个 commit（X/Y 成对）。
 
 运行两次：
-1) 默认模式：只分类并导出审查材料（STATE_DIR/review_changes.txt + plan.json），
-   人工/AI 审查后把可疑改动（整块旧/新文本）填入 STATE_DIR/triage_exclude.json。
-2) --commit：提交未被排除的候选对。
+1) 默认模式：分类并导出审查材料（STATE_DIR/review_changes.txt = 类别 1 候选块、
+   suspect_changes.txt = 疑类别 2 块、plan.json = 逐文件块对明细）。
+2) --commit：提交未被排除的类别 1 块。
 用法: uv run python scripts/s5_triage_text.py [--commit]
 """
 
@@ -20,10 +34,15 @@ import os
 import sys
 from collections import Counter, defaultdict
 
+import regex as re  # 规则含 \p{}，stdlib re 不支持
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import (TEXT_EXT, CatFile, chunk_changes, commit_paths,
-                        frag_set, git, head_sha_map)  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_triage import (TEXT_EXT, CatFile, aligned_chunks, apply_blocks,  # noqa: E402
+                        apply_frags, chunk_changes, commit_paths, frag_set,
+                        git, head_sha_map, norm_ws, text_chunks)
 from s1_commit_image_renames import STATE_DIR  # noqa: E402
+from x2y import fixes  # noqa: E402
 
 
 def term_summary(o: str, n: str, maxlen: int = 40) -> str:
@@ -32,9 +51,67 @@ def term_summary(o: str, n: str, maxlen: int = 40) -> str:
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             continue
-        a, b = o[i1:i2], n[j1:j2]
-        outs.append(f"{a[:maxlen]}→{b[:maxlen]}")
+        outs.append(f"{o[i1:i2][:maxlen]}→{n[j1:j2][:maxlen]}")
     return "；".join(outs)
+
+
+def block_frags(o: str, n: str) -> set:
+    return set(frag_set([(o, n)]))
+
+
+def indexed_changes(old: bytes, new: bytes):
+    """[(旧块索引, 旧块, 新块)]（norm_ws 形态）；有增删返回 None。"""
+    al = aligned_chunks(old, new)
+    if al is None:
+        return None
+    oc, nc, ops = al
+    on = [norm_ws(c) for c in oc]
+    nn = [norm_ws(c) for c in nc]
+    out = []
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            continue
+        for oi, nj in zip(range(i1, i2), range(j1, j2)):
+            out.append((oi, on[oi], nn[nj]))
+    return out
+
+
+def positional_map(xhead: bytes, yhead: bytes):
+    """旧 X 块索引 → 旧 Y 块索引（允许旧 Y 被规则 1:1 改写）；失败返回 None。"""
+    xn = [norm_ws(c) for c in text_chunks(xhead)]
+    yn = [norm_ws(c) for c in text_chunks(yhead)]
+    sm = difflib.SequenceMatcher(a=xn, b=yn, autojunk=False)
+    m = {}
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
+            for k in range(i2 - i1):
+                m[i1 + k] = j1 + k
+        else:
+            return None
+    return m
+
+
+def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
+    """X 侧块 (o,n) 相对 other_frags 的 X 独有改动是否全部由 x2y 规则解释。
+
+    反复应用「能严格缩小 (o,n) 差异片段集」的规则；收敛后剩余片段都在
+    other_frags 中，则该块的 X 独有部分是规则覆盖的（上游采纳了规则）。
+    被用到的规则记入 used（供类别 3 后续处理：注释规则）。
+    """
+    cur = block_frags(o, n)
+    rules = fixes.get(vol, []) + fixes["*"]
+    changed = True
+    while changed:
+        changed = False
+        for ro, rn in rules:
+            o2 = re.sub(ro, rn, o)
+            if o2 == o:
+                continue
+            f2 = block_frags(o2, n)
+            if f2 < cur:
+                used.append((ro, rn))
+                o, cur, changed = o2, f2, True
+    return cur <= other_frags
 
 
 def main() -> None:
@@ -47,15 +124,15 @@ def main() -> None:
 
     hm = head_sha_map()
     cf = CatFile()
-    changes: dict[str, list] = {}
-    complex_files = set()
+    head: dict[str, bytes] = {}
+    work: dict[str, bytes] = {}
+    new_files = set()
     for path in mfiles:
-        ch = chunk_changes(cf.read(hm[path]),
-                           open(path, "rb").read())
-        if ch is None:
-            complex_files.add(path)
-        else:
-            changes[path] = ch
+        if path not in hm:
+            new_files.add(path)
+            continue
+        head[path] = cf.read(hm[path])
+        work[path] = open(path, "rb").read()
     cf.close()
 
     groups = defaultdict(dict)
@@ -63,43 +140,133 @@ def main() -> None:
         root, rel = p.split("/", 1)
         groups[rel][root] = p
 
-    plan = {"same": [], "diff_ok": [], "diff_bad": [], "x_only": [],
-            "y_only": [], "complex": []}
-    for rel, d in groups.items():
+    # 逐文件块对分类
+    # pairs_by_rel[rel] = [(kind, xblock_or_None, yblock_or_None)]
+    # kind: "cat1"（对）/ "cat1y"（仅 Y 块类别 1，X 块类别 3）/
+    #       "cat3" / "suspect"
+    pairs_by_rel: dict[str, list] = {}
+    complex_rels, new_only = [], []
+    rule_use: dict[tuple, set] = defaultdict(set)
+    for rel, d in sorted(groups.items()):
         xp, yp = d.get("X"), d.get("Y")
-        xc = changes.get(xp) if xp else None
-        yc = changes.get(yp) if yp else None
-        if (xp in complex_files) or (yp in complex_files):
-            plan["complex"].append(rel)
-        elif xc and yc:
-            if sorted(xc) == sorted(yc):
-                plan["same"].append(rel)
-            elif frag_set(xc) == frag_set(yc):
-                plan["diff_ok"].append(rel)
+        if (xp and xp in new_files) or (yp and yp in new_files):
+            new_only.append(rel)
+            continue
+        if not xp and not yp:
+            continue
+        # 单侧无改动：该侧取 HEAD 内容充当 head=work（空改动集），照常配对；
+        # 该侧在 HEAD 也不存在（增删）→ 复杂，人工
+        missing = False
+        for side, p in (("X", xp), ("Y", yp)):
+            if p is None:
+                q = f"{side}/{rel}"
+                if q not in hm:
+                    missing = True
+                    break
+                head[q] = git("show", f"HEAD:{q}")
+                work[q] = head[q]
+                d[side] = q
+        if missing:
+            complex_rels.append(rel)
+            continue
+        xp, yp = d["X"], d["Y"]
+        xch = indexed_changes(head[xp], work[xp])
+        ych = indexed_changes(head[yp], work[yp])
+        if xch is None or ych is None:
+            complex_rels.append(rel)
+            continue
+        if not xch and not ych:
+            continue
+        pmap = positional_map(head[xp], head[yp])
+        if pmap is None:
+            complex_rels.append(rel)
+            continue
+        vol = rel.split("/")[0]
+        y_by_oi = {oi: (o, n) for oi, o, n in ych}
+        matched_yi = set()
+        pairs = []
+        for oi, xo, xn in xch:
+            yb = y_by_oi.get(pmap.get(oi))
+            if yb is None:
+                used: list = []
+                kind = "cat3" if convergent(vol, xo, xn, set(), used) \
+                    else "suspect"
+                for r in used:
+                    rule_use[r].add(rel)
+                pairs.append((kind, (xo, xn), None))
+                continue
+            matched_yi.add(pmap.get(oi))
+            yo, yn = yb
+            fx, fy = block_frags(xo, xn), block_frags(yo, yn)
+            if fx == fy:
+                pairs.append(("cat1", (xo, xn), yb))
+            elif fy < fx:
+                used = []
+                if convergent(vol, xo, xn, fy, used):
+                    for r in used:
+                        rule_use[r].add(rel)
+                    pairs.append(("cat1y", (xo, xn), yb))  # X 块留下，Y 块提交
+                else:
+                    pairs.append(("suspect", (xo, xn), yb))
             else:
-                plan["diff_bad"].append(rel)
-        elif xc:
-            plan["x_only"].append(rel)
-        elif yc:
-            plan["y_only"].append(rel)
+                pairs.append(("suspect", (xo, xn), yb))
+        for oi, yo, yn in ych:
+            if oi not in matched_yi:
+                pairs.append(("suspect", None, (yo, yn)))  # 仅 Y 有改动
+        pairs_by_rel[rel] = pairs
 
-    for k, v in plan.items():
-        print(f"{len(v):5d}  {k}")
+    n_cat1 = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "cat1")
+    n_cat1y = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "cat1y")
+    n_cat3 = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "cat3")
+    n_susp = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "suspect")
+    print(f"{len(pairs_by_rel):5d}  有文本改动的文件对")
+    print(f"{n_cat1:5d}  类别 1 候选块对")
+    print(f"{n_cat1y:5d}  混合块对（片段级拆分：类别 1 片段两侧提交）")
+    print(f"{n_cat3 + n_cat1y:5d}  类别 3 块（规则覆盖，留下）")
+    print(f"{n_susp:5d}  疑类别 2 块对（留下）")
+    print(f"{len(complex_rels):5d}  复杂（对齐失败，留下）")
+    if new_only:
+        print(f"{len(new_only):5d}  新增文件（未处理，人工）")
 
-    # 导出审查材料：候选的全部去重改动
+    # 导出审查材料
     os.makedirs(STATE_DIR, exist_ok=True)
     agg = Counter()
-    for rel in plan["same"] + plan["diff_ok"]:
-        for o, n in changes["X/" + rel]:
-            agg[(o, n)] += 1
+    for ps in pairs_by_rel.values():
+        for k, xb, _ in ps:
+            if k in ("cat1", "cat1y") and xb:
+                agg[xb] += 1
     with open(os.path.join(STATE_DIR, "review_changes.txt"), "w",
               encoding="utf-8") as f:
         for (o, n), c in agg.most_common():
             f.write(f"[{c}次]\n- {o}\n+ {n}\n\n")
+    with open(os.path.join(STATE_DIR, "suspect_changes.txt"), "w",
+              encoding="utf-8") as f:
+        for rel, ps in pairs_by_rel.items():
+            for k, xb, yb in ps:
+                if k != "suspect":
+                    continue
+                for side, b in (("X", xb), ("Y", yb)):
+                    if b:
+                        f.write(f"[{side}] {rel}\n- {b[0]}\n+ {b[1]}\n\n")
+    plan = {
+        "summary": {"pairs": len(pairs_by_rel), "cat1": n_cat1,
+                    "cat1y": n_cat1y, "cat3": n_cat3, "suspect": n_susp,
+                    "complex": len(complex_rels)},
+        "files": {rel: [{"kind": k, "x": xb, "y": yb}
+                        for k, xb, yb in ps if k != "cat1"]
+                  for rel, ps in pairs_by_rel.items()
+                  if any(k != "cat1" for k, _, _ in ps)},
+        "complex": complex_rels,
+        "new_files": new_only,
+        "cat3_rules": {f"{ro} -> {rn}": sorted(rels)
+                       for (ro, rn), rels in sorted(rule_use.items())},
+    }
     json.dump(plan, open(os.path.join(STATE_DIR, "plan.json"), "w",
                          encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"审查材料: {os.path.join(STATE_DIR, 'review_changes.txt')}"
           f"（{sum(agg.values())} 块 / 去重 {len(agg)}）")
+    if n_susp:
+        print(f"疑类别 2: {os.path.join(STATE_DIR, 'suspect_changes.txt')}")
 
     if not do_commit:
         print("审查后把可疑改动（整块 old/new）写入 "
@@ -110,36 +277,88 @@ def main() -> None:
     excludes = set()
     if os.path.exists(excl_path):
         excludes = {tuple(x) for x in json.load(open(excl_path, encoding="utf-8"))}
-        print(f"排除规则 {len(excludes)} 条")
-
-    rejected, accepted = [], []
-    for rel in plan["same"] + plan["diff_ok"]:
-        ch = changes["X/" + rel]
-        if any(tuple(c) in excludes for c in ch):
-            rejected.append(rel)
-        else:
-            accepted.append(rel)
-    print(f"提交 {len(accepted)} 对，剔除 {len(rejected)} 对")
-    for rel in rejected:
-        print("  剔除:", rel)
+        print(f"排除规则 {len(excludes)} 条（按块对生效）")
 
     fails = 0
-    for rel in accepted:
-        ch = changes["X/" + rel]
+    committed_rels = 0
+    for rel, ps in pairs_by_rel.items():
+        keepx, keepy, partx, partn = [], [], {}, {}
+        for k, xb, yb in ps:
+            if k not in ("cat1", "cat1y"):
+                continue
+            if (xb and xb in excludes) or (yb and yb in excludes):
+                continue  # 块对级排除
+            if k == "cat1":
+                keepx.append(xb)
+                keepy.append(yb)
+            else:  # 混合块对：Y 整块提交，X 侧片段级拆分只应用类别 1 片段
+                fy = block_frags(*yb)
+                keepy.append(yb)
+                partx[xb] = block_frags(*xb) - fy
+                partn[xb] = (xb[0], apply_frags(xb[0], xb[1], fy))
+        if not keepx and not keepy and not partx:
+            continue
+        xp, yp = "X/" + rel, "Y/" + rel
+        inter = {}
+        if keepx or partx:
+            s = apply_blocks(head[xp], work[xp], set(keepx), partial=partx)
+            if s is None:
+                print("  定位歧义，整文件留审:", rel)
+                fails += 1
+                continue
+            inter[xp] = s
+        if keepy:
+            s = apply_blocks(head[yp], work[yp], set(keepy))
+            if s is None:
+                print("  定位歧义，整文件留审:", rel)
+                fails += 1
+                continue
+            inter[yp] = s
+        # 校验：中间版本恰好 = keep 块 ∪ 混合块的部分应用（混合块允许
+        # 因片段定位失败退化为整块还原，即不出现）
+        ok, ncx, ncy = True, 0, 0
+        for p, keep, partok, which in (
+                (xp, keepx, set(partn.values()), "x"),
+                (yp, keepy, set(), "y")):
+            if p not in inter:
+                continue
+            got = chunk_changes(head[p], inter[p].encode("utf-8"))
+            if got is None or not set(keep) <= set(got) <= set(keep) | partok:
+                print("  中间版本校验失败，整文件留审:", rel)
+                ok = False
+            elif which == "x":
+                ncx = len(got)
+            else:
+                ncy = len(got)
+        if not ok:
+            fails += 1
+            continue
+        paths = list(inter)
         if rel.lower().endswith((".opf", ".ncx")):
             subject, body = f"chore: sync {rel}", "元数据/时间戳更新"
         else:
-            terms = [t for t in (term_summary(o, n) for o, n in ch) if t]
+            terms = [t for t in (term_summary(o, n) for o, n in keepx) if t]
             body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-            subject = f"fix: sync {rel}（{len(ch)} 处文本修订）"
+            subject = f"fix: sync {rel}（{ncx + ncy} 处文本修订）"
+        saved = {}
         try:
-            commit_paths(subject, body, ["X/" + rel, "Y/" + rel])
+            for p in paths:
+                saved[p] = open(p, "rb").read()
+                with open(p, "wb") as f:
+                    f.write(inter[p].encode("utf-8"))
+            commit_paths(subject, body, paths)
+            committed_rels += 1
         except Exception as ex:
             fails += 1
             print("  FAIL:", rel, str(ex)[:150])
+        finally:
+            for p, b in saved.items():
+                with open(p, "wb") as f:
+                    f.write(b)
+        git("add", "-A")
     git("add", "-A")
     left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines() if l]
-    print(f"完成。失败 {fails}，剩余暂存 {len(left)}")
+    print(f"完成。提交 {committed_rels} 对，失败/留审 {fails}，剩余暂存 {len(left)}")
 
 
 if __name__ == "__main__":
