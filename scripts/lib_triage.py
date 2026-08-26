@@ -262,7 +262,7 @@ def apply_blocks(old: bytes, new: bytes,
 
     keep 为 norm_ws 的 (旧块, 新块) 集合（chunk_changes 的元素），整块保留。
     partial 为 {(旧块, 新块): 需还原的 (旧片段, 新片段) 集合}——混合块只还原
-    类别 2/3 片段，类别 1 片段仍然应用（片段级拆分）。
+    规则采纳/疑似片段，正常同步片段仍然应用（片段级拆分）。
     块或片段在文件中定位歧义时返回 None（调用方应整文件留审）。
     """
     partial = partial or {}
@@ -285,8 +285,8 @@ def apply_blocks(old: bytes, new: bytes,
             if hit is None:
                 return None
             if key in partial:
-                # 片段级还原：在 raw 新块中把类别 2/3 的新片段换回旧片段；
-                # 片段定位失败则退化为整块还原（不提交该块的类别 1 部分，安全）
+                # 片段级还原：在 raw 新块中把规则采纳/疑似的新片段换回旧片段；
+                # 片段定位失败则退化为整块还原（不提交该块的正常同步部分，安全）
                 s, ok = nvs[hit], True
                 for a, b in partial[key]:
                     bvs, avs = raw_variants(b), raw_variants(a)
