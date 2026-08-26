@@ -11,8 +11,6 @@
 
 打包好的 epub 文件可以在 [Releases](https://github.com/CCXXXI/index-Y/releases/latest) 下载。
 
-受 GitHub 限制，上传的文件无法保留中文名，如有需要可下载 zip 文件。
-
 为方便相互替换，文件名与 X 版保持一致。
 
 ## 反馈
