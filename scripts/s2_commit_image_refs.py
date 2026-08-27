@@ -21,9 +21,11 @@ def main() -> None:
     if not os.path.exists(map_path):
         raise SystemExit(f"缺少 {map_path}，请先运行 s1_commit_image_renames.py")
     renames = json.load(open(map_path, encoding="utf-8"))
+    print(f"映射 {len(renames)} 条")
+    if not renames:
+        return
     keys = sorted(renames, key=len, reverse=True)  # 长 key 优先，防子串歧义
     pattern = re.compile("|".join(re.escape(k) for k in keys))
-    print(f"映射 {len(renames)} 条")
 
     git("add", "-A")
     entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")

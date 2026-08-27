@@ -23,6 +23,17 @@ def main() -> None:
     print(f"rename 总数 {len(pairs)}，图片 {len(img)}，非图片（跳过） {len(other)}")
     for f, t in other:
         print(f"  跳过: {f} -> {t}")
+
+    # basename -> basename（含书号前缀，全局唯一）；无图片重命名时也写空映射，
+    # 供批次 2 判断「本批无引用要更新」
+    os.makedirs(STATE_DIR, exist_ok=True)
+    m = {os.path.basename(f): os.path.basename(t) for f, t in img}
+    # 与已有映射合并（X/Y 两树的 rename 可能分属不同批次）
+    map_path = os.path.join(STATE_DIR, "rename_map.json")
+    if os.path.exists(map_path):
+        m = {**json.load(open(map_path, encoding="utf-8")), **m}
+    json.dump(m, open(map_path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
     if not img:
         print("无图片重命名")
         return
@@ -38,15 +49,6 @@ def main() -> None:
 
     git("commit", "-q", "-m", "refactor: rename image files")
     git("add", "-A")
-
-    os.makedirs(STATE_DIR, exist_ok=True)
-    # basename -> basename（含书号前缀，全局唯一）
-    m = {os.path.basename(f): os.path.basename(t) for f, t in img}
-    # 与已有映射合并（X/Y 两树的 rename 可能分属不同批次）
-    map_path = os.path.join(STATE_DIR, "rename_map.json")
-    if os.path.exists(map_path):
-        m = {**json.load(open(map_path, encoding="utf-8")), **m}
-    json.dump(m, open(map_path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"已提交 {len(img)} 个图片重命名；映射共 {len(m)} 条 -> {map_path}")
 
 

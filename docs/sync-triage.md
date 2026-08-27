@@ -27,6 +27,8 @@ uv run python scripts/s6b_prune_redundant_rules.py --commit  # 收尾删除对�
 
 s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在 `%LOCALAPPDATA%\index-Y-triage\`。
 
+各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：s1 无图片重命名时也会写出空 `rename_map.json`，s2 读到空映射直接跳过。
+
 ## 0. 前置校验：Y 必须与当前 X 同步
 
 **分流前先确认 Y 是由当前 X 生成的**，否则整个分类会系统性失真（典型原因：忘记重跑 x2y.py，Y 滞后一个上游版本）。
