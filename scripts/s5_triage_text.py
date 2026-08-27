@@ -119,10 +119,11 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
 def classify() -> dict:
     """对当前工作区改动做逐文件块对分类（s5/s6a/s6b 共用）。
 
-    返回 {pairs_by_rel, complex, new_files, rule_use, head, work}：
+    返回 {pairs_by_rel, complex, new_files, rule_use, touched_rules, head, work}：
     - pairs_by_rel[rel] = [(kind, xblock_or_None, yblock_or_None)]，
       kind: "sync" / "mixed" / "adopted" / "suspect"
     - rule_use: {(section, ro, rn): {rel, ...}}，收敛判定用到的规则
+    - touched_rules: 同构，能命中改动块旧 X 文本的全部规则（s6b 候选超集）
     - head/work: 路径 -> bytes（单侧无改动的另一侧以 HEAD 内容充当）
     """
     git("add", "-A")
@@ -152,6 +153,7 @@ def classify() -> dict:
     pairs_by_rel: dict[str, list] = {}
     complex_rels, new_only = [], []
     rule_use: dict[tuple, set] = defaultdict(set)
+    touched_rules: dict[tuple, set] = defaultdict(set)
     for rel, d in sorted(groups.items()):
         xp, yp = d.get("X"), d.get("Y")
         if (xp and xp in new_files) or (yp and yp in new_files):
@@ -187,6 +189,14 @@ def classify() -> dict:
             complex_rels.append(rel)
             continue
         vol = rel.split("/")[0]
+        # 规则触点：规则若能命中改动块的【旧】X 文本，上游改动可能使其失效
+        # （收敛采纳 / 改写为第三种形式都算）——全部记为 s6b 候选，验证把关
+        rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
+                 + [("*", ro, rn) for ro, rn in fixes["*"]])
+        for _, xo, _ in xch:
+            for r in rules:
+                if re.search(r[1], xo):
+                    touched_rules[r].add(rel)
         y_by_oi = {oi: (o, n) for oi, o, n in ych}
         matched_yi = set()
         pairs = []
@@ -222,7 +232,7 @@ def classify() -> dict:
 
     return {"pairs_by_rel": pairs_by_rel, "complex": complex_rels,
             "new_files": new_only, "rule_use": rule_use,
-            "head": head, "work": work}
+            "touched_rules": touched_rules, "head": head, "work": work}
 
 
 def main() -> None:

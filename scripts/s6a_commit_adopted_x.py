@@ -14,6 +14,7 @@
 import json
 import os
 import sys
+from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,10 +33,15 @@ def main() -> None:
         print("提示: 存在正常同步候选/混合块，混合块的规则采纳片段需等 "
               "s5 --commit 后再跑本脚本收尾")
 
-    # 导出收敛用到的规则（section 归属），供 s6b 定位验证
+    # 导出 s6b 候选：收敛用到的规则 ∪ 命中改动块旧文本的规则
+    # （上游改写源文本为第三种形式致规则失效的情形由后者覆盖）
     os.makedirs(STATE_DIR, exist_ok=True)
+    cand = defaultdict(set)
+    for src in (r["rule_use"], r["touched_rules"]):
+        for k, rels in src.items():
+            cand[k] |= rels
     adopted_rules = [{"section": sec, "old": ro, "new": rn, "rels": sorted(rels)}
-                     for (sec, ro, rn), rels in sorted(r["rule_use"].items())]
+                     for (sec, ro, rn), rels in sorted(cand.items())]
     with open(os.path.join(STATE_DIR, "adopted_rules.json"), "w",
               encoding="utf-8") as f:
         json.dump(adopted_rules, f, ensure_ascii=False, indent=1)
