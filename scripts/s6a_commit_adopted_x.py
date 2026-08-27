@@ -30,6 +30,7 @@ def main() -> None:
     dry_run = "--dry-run" in sys.argv
     r = classify()
     pairs_by_rel, head, work = r["pairs_by_rel"], r["head"], r["work"]
+    structural_ok = r.get("structural_ok", set())
 
     if any(k in ("sync", "mixed")
            for ps in pairs_by_rel.values() for k, _, _ in ps):
@@ -54,13 +55,15 @@ def main() -> None:
 
     fails = committed = rk_committed = 0
     for rel, ps in pairs_by_rel.items():
+        if rel in structural_ok:
+            continue  # 结构文件由 s5 --commit 整文件成对提交
         keep = {tuple(xb) for k, xb, _ in ps if k == "adopted" and xb}
         if not keep:
             continue
         xp = "X/" + rel
         inter = apply_blocks(head[xp], work[xp], keep)
         if inter is None:
-            print("  定位歧义，整文件留审:", rel)
+            print("  定位歧义或含结构改动，整文件留审:", rel)
             fails += 1
             continue
         got = chunk_changes(head[xp], inter.encode("utf-8"))
@@ -92,6 +95,8 @@ def main() -> None:
 
     # 规则失效型收敛块对：成对提交（X/Y 同块，新文本两侧逐字一致）
     for rel, ps in pairs_by_rel.items():
+        if rel in structural_ok:
+            continue  # 结构文件由 s5 --commit 整文件成对提交
         rk = [(tuple(xb), tuple(yb))
               for k, xb, yb in ps if k == "rulekilled" and xb and yb]
         if not rk:
@@ -101,7 +106,7 @@ def main() -> None:
         ix = apply_blocks(head[xp], work[xp], keepx)
         iy = apply_blocks(head[yp], work[yp], keepy)
         if ix is None or iy is None:
-            print("  定位歧义，整文件留审:", rel)
+            print("  定位歧义或含结构改动，整文件留审:", rel)
             fails += 1
             continue
         gx = chunk_changes(head[xp], ix.encode("utf-8"))

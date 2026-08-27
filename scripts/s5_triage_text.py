@@ -4,6 +4,10 @@
 1. 两侧各自提取相对 HEAD 的文本改动（文本块级 difflib，仅接受 1:1 replace）。
 2. 旧 X 与旧 Y 的文本块序列做【位置对齐】（1:1，允许旧 Y 被规则改写），
    把两侧改动配成「同位置块对」。位置对齐失败 → 复杂，整文件留下。
+   含块增删/N→M 替换的结构改动文件走 structural_pairs 块组级配对：
+   以「映射后旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组并做内容
+   收敛验证；全部块对为 sync/rulekilled 时整文件成对提交（无法按块拆分），
+   否则整文件留审。
 3. 逐块对分类（F() = 块内最小差异片段集）：
    - 两侧都有改动且 F(x) == F(y)          → 正常同步候选对（"sync"）
    - 两侧都有改动且 F(x) ⊃ F(y)，X 多出的片段能被 x2y 规则解释（收敛）
@@ -42,7 +46,14 @@ from lib_triage import (TEXT_EXT, CatFile, aligned_chunks, apply_blocks,  # noqa
                         apply_frags, chunk_changes, commit_paths, frag_set,
                         git, head_sha_map, norm_ws, text_chunks)
 from s1_commit_image_renames import STATE_DIR  # noqa: E402
-from x2y import fixes  # noqa: E402
+from x2y import fixes, fixed  # noqa: E402
+
+
+def apply_rules(vol: str, s: str) -> str:
+    """对文本应用该卷全部 x2y 规则（fixed 的规则部分），供收敛验证。"""
+    for ro, rn in fixes.get(vol, []) + fixes["*"]:
+        s = re.sub(ro, rn, s)
+    return s
 
 
 def term_summary(o: str, n: str, maxlen: int = 40) -> str:
@@ -53,6 +64,15 @@ def term_summary(o: str, n: str, maxlen: int = 40) -> str:
             continue
         outs.append(f"{o[i1:i2][:maxlen]}→{n[j1:j2][:maxlen]}")
     return "；".join(outs)
+
+
+def group_summary(o: str, n: str, maxlen: int = 40) -> str:
+    """块/组的提交信息摘要；结构组的增删一侧为空串。"""
+    if not o:
+        return f"新增块: {n[:maxlen]}"
+    if not n:
+        return f"删除块: {o[:maxlen]}"
+    return term_summary(o, n, maxlen)
 
 
 def block_frags(o: str, n: str) -> set:
@@ -89,6 +109,95 @@ def positional_map(xhead: bytes, yhead: bytes):
         else:
             return None
     return m
+
+
+def classify_block(vol: str, rules: list, xo: str, xn: str,
+                   yo: str, yn: str):
+    """1:1 块对分类。返回 (kind, used, fired)：
+    used = 收敛判定用到的规则；fired = rulekilled 块命中旧文本的规则。"""
+    fx, fy = block_frags(xo, xn), block_frags(yo, yn)
+    if fx == fy:
+        return "sync", [], []
+    if xn == yn and not any(re.search(r[1], xn) for r in rules):
+        # 规则失效型收敛：旧 X 命中规则（两侧分叉由规则造成），
+        # 上游改写/消除触发文本后两侧逐字收敛且无规则命中。
+        # 必是 rule 命中旧文本（否则 xo==yo、fx==fy 走 sync 了）
+        fired = [r for r in rules if re.search(r[1], xo)]
+        return ("rulekilled", [], fired) if fired else ("suspect", [], [])
+    if fy < fx:
+        used: list = []
+        if convergent(vol, xo, xn, fy, used):
+            return "mixed", used, []  # X 块留下，Y 块提交
+    return "suspect", [], []
+
+
+def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
+                     yh: bytes, yw: bytes, pmap: dict):
+    """结构改动文件（块增删 / N→M 替换）的块组级配对分类。
+
+    以「映射后的旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组，配对的
+    组做内容收敛验证（X 组文本应用规则后 == Y 组文本）；1:1 组逐块走块级
+    分类。返回 (pairs, gate_ok, used_rules, fired_rules)。
+    gate_ok = 全部块对为 sync/rulekilled——结构文件无法按块拆分提交，
+    仅在全通过时整文件成对提交，否则整文件留审。
+    """
+    xoc = [norm_ws(c) for c in text_chunks(xh)]
+    xnc = [norm_ws(c) for c in text_chunks(xw)]
+    yoc = [norm_ws(c) for c in text_chunks(yh)]
+    ync = [norm_ws(c) for c in text_chunks(yw)]
+    xops = [op for op in difflib.SequenceMatcher(a=xoc, b=xnc, autojunk=False)
+            .get_opcodes() if op[0] != "equal"]
+    yops = [op for op in difflib.SequenceMatcher(a=yoc, b=ync, autojunk=False)
+            .get_opcodes() if op[0] != "equal"]
+    y_by_key = defaultdict(list)
+    for t, i1, i2, j1, j2 in yops:
+        y_by_key[(i1, t, i2 - i1, j2 - j1)].append((t, i1, i2, j1, j2))
+
+    pairs, gate = [], True
+    used_rules, fired_rules = [], []
+    for t, i1, i2, j1, j2 in xops:
+        a = pmap[i1] if i1 < len(xoc) else len(yoc)
+        key = (a, t, i2 - i1, j2 - j1)
+        xo_s, xn_s = "\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])
+        if key not in y_by_key:
+            # X 侧独有组：1:1 逐块判定规则采纳；结构组 → 疑似
+            gate = False
+            if t == "replace" and (i2 - i1) == (j2 - j1):
+                for k in range(i2 - i1):
+                    xo, xn = xoc[i1 + k], xnc[j1 + k]
+                    used: list = []
+                    kind = ("adopted" if convergent(vol, xo, xn, set(), used)
+                            else "suspect")
+                    used_rules += used
+                    pairs.append((kind, (xo, xn), None))
+            else:
+                pairs.append(("suspect", (xo_s, xn_s), None))
+            continue
+        _, yi1, yi2, yj1, yj2 = y_by_key[key].pop(0)
+        yo_s, yn_s = "\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2])
+        if apply_rules(vol, xo_s) != yo_s or apply_rules(vol, xn_s) != yn_s:
+            pairs.append(("suspect", (xo_s, xn_s), (yo_s, yn_s)))
+            gate = False
+            continue
+        if t != "replace" or (i2 - i1) != (j2 - j1):
+            pairs.append(("sync", (xo_s, xn_s), (yo_s, yn_s)))  # 结构组
+            continue
+        for k in range(i2 - i1):  # 1:1 组逐块走块级分类
+            kind, used, fired = classify_block(vol, rules,
+                                               xoc[i1 + k], xnc[j1 + k],
+                                               yoc[yi1 + k], ync[yj1 + k])
+            used_rules += used
+            fired_rules += fired
+            pairs.append((kind, (xoc[i1 + k], xnc[j1 + k]),
+                          (yoc[yi1 + k], ync[yj1 + k])))
+            if kind not in ("sync", "rulekilled"):
+                gate = False
+    for ops in y_by_key.values():  # Y 侧未配对组 → 疑似
+        for t, yi1, yi2, yj1, yj2 in ops:
+            pairs.append(("suspect", None,
+                          ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2]))))
+            gate = False
+    return pairs, gate, used_rules, fired_rules
 
 
 def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
@@ -153,6 +262,7 @@ def classify() -> dict:
 
     pairs_by_rel: dict[str, list] = {}
     complex_rels, new_only = [], []
+    structural_ok: set = set()
     rule_use: dict[tuple, set] = defaultdict(set)
     touched_rules: dict[tuple, set] = defaultdict(set)
     rulekilled_rules: dict[tuple, set] = defaultdict(set)
@@ -181,10 +291,8 @@ def classify() -> dict:
         xp, yp = d["X"], d["Y"]
         xch = indexed_changes(head[xp], work[xp])
         ych = indexed_changes(head[yp], work[yp])
-        if xch is None or ych is None:
-            complex_rels.append(rel)
-            continue
-        if not xch and not ych:
+        structural = xch is None or ych is None
+        if not structural and not xch and not ych:
             continue
         pmap = positional_map(head[xp], head[yp])
         if pmap is None:
@@ -195,6 +303,25 @@ def classify() -> dict:
         # （收敛采纳 / 改写为第三种形式都算）——全部记为 s6b 候选，验证把关
         rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
                  + [("*", ro, rn) for ro, rn in fixes["*"]])
+        if structural:
+            # 结构改动（块增删/N→M）：块组级配对分类。gate 通过（全
+            # sync/rulekilled）的文件记入 structural_ok，--commit 时整文件
+            # 成对提交；否则整文件留审（块对照常导出供审查/反馈）
+            pairs, gate, used, fired = structural_pairs(
+                vol, rules, head[xp], work[xp], head[yp], work[yp], pmap)
+            for r in used:
+                rule_use[r].add(rel)
+            for r in fired:
+                rulekilled_rules[r].add(rel)
+            for _, xb, _ in pairs:
+                if xb:
+                    for r in rules:
+                        if re.search(r[1], xb[0]):
+                            touched_rules[r].add(rel)
+            pairs_by_rel[rel] = pairs
+            if gate and pairs:
+                structural_ok.add(rel)
+            continue
         for _, xo, _ in xch:
             for r in rules:
                 if re.search(r[1], xo):
@@ -214,30 +341,12 @@ def classify() -> dict:
                 continue
             matched_yi.add(pmap.get(oi))
             yo, yn = yb
-            fx, fy = block_frags(xo, xn), block_frags(yo, yn)
-            if fx == fy:
-                pairs.append(("sync", (xo, xn), yb))
-            elif xn == yn and not any(re.search(r[1], xn) for r in rules):
-                # 规则失效型收敛：旧 X 命中规则（两侧分叉由规则造成），
-                # 上游改写/消除触发文本后两侧逐字收敛且无规则命中。
-                # 必是 rule 命中旧文本（否则 xo==yo、fx==fy 走 sync 了）
-                fired = [r for r in rules if re.search(r[1], xo)]
-                if fired:
-                    for r in fired:
-                        rulekilled_rules[r].add(rel)
-                    pairs.append(("rulekilled", (xo, xn), yb))
-                    continue
-                pairs.append(("suspect", (xo, xn), yb))
-            elif fy < fx:
-                used = []
-                if convergent(vol, xo, xn, fy, used):
-                    for r in used:
-                        rule_use[r].add(rel)
-                    pairs.append(("mixed", (xo, xn), yb))  # X 块留下，Y 块提交
-                else:
-                    pairs.append(("suspect", (xo, xn), yb))
-            else:
-                pairs.append(("suspect", (xo, xn), yb))
+            kind, used, fired = classify_block(vol, rules, xo, xn, yo, yn)
+            for r in used:
+                rule_use[r].add(rel)
+            for r in fired:
+                rulekilled_rules[r].add(rel)
+            pairs.append((kind, (xo, xn), yb))
         for oi, yo, yn in ych:
             if oi not in matched_yi:
                 pairs.append(("suspect", None, (yo, yn)))  # 仅 Y 有改动
@@ -247,6 +356,7 @@ def classify() -> dict:
             "new_files": new_only, "rule_use": rule_use,
             "touched_rules": touched_rules,
             "rulekilled_rules": rulekilled_rules,
+            "structural_ok": structural_ok,
             "head": head, "work": work}
 
 
@@ -256,6 +366,7 @@ def main() -> None:
     pairs_by_rel = r["pairs_by_rel"]
     complex_rels, new_only = r["complex"], r["new_files"]
     rule_use = r["rule_use"]
+    structural_ok = r["structural_ok"]
     head, work = r["head"], r["work"]
 
     n_sync = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "sync")
@@ -270,6 +381,9 @@ def main() -> None:
     print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，留 s6a）")
     print(f"{n_susp:5d}  疑似上游错误块对（留下）")
     print(f"{len(complex_rels):5d}  复杂（对齐失败，留下）")
+    if structural_ok:
+        print(f"{len(structural_ok):5d}  结构改动文件（块组已配对收敛，"
+              f"全过审后整文件成对提交）")
     if new_only:
         print(f"{len(new_only):5d}  新增文件（未处理，人工）")
 
@@ -303,6 +417,7 @@ def main() -> None:
                   for rel, ps in pairs_by_rel.items()
                   if any(k != "sync" for k, _, _ in ps)},
         "complex": complex_rels,
+        "structural_ok": sorted(structural_ok),
         "new_files": new_only,
         "adopted_rules": {f"{sec}: {ro} -> {rn}": sorted(rels)
                        for (sec, ro, rn), rels in sorted(rule_use.items())},
@@ -328,6 +443,37 @@ def main() -> None:
     fails = 0
     committed_rels = 0
     for rel, ps in pairs_by_rel.items():
+        if rel in structural_ok:
+            # 结构文件：无法按块拆分，全 sync/rulekilled 且无排除时整文件成对提交
+            if any((xb and xb in excludes) or (yb and yb in excludes)
+                   for _, xb, yb in ps):
+                print("  结构文件含被排除块，整文件留审:", rel)
+                fails += 1
+                continue
+            xp, yp = "X/" + rel, "Y/" + rel
+            vol = rel.split("/")[0]
+            # 不变式校验（与 check_y_freshness 同语义：换行归一化后
+            # fixed(X) == Y；x2y 写出的 Y 与上游 X 换行风格可能不同）
+            xtxt = work[xp].decode("utf-8").replace("\r\n", "\n")
+            ytxt = work[yp].decode("utf-8").replace("\r\n", "\n")
+            if fixed(vol, xtxt) != ytxt:
+                print("  fixed(X) != Y，不变式不满足，整文件留审:", rel)
+                fails += 1
+                continue
+            paths = [p for p in (xp, yp) if head[p] != work[p]]
+            terms = [group_summary(o, n) for k, (o, n), _ in
+                     (p for p in ps if p[1])]
+            terms = [t for t in terms if t]
+            body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
+            try:
+                commit_paths(f"fix: sync {rel}（{len(ps)} 处文本修订）",
+                             body, paths)
+                committed_rels += 1
+            except Exception as ex:
+                fails += 1
+                print("  FAIL:", rel, str(ex)[:150])
+            git("add", "-A")
+            continue
         keepx, keepy, partx, partn = [], [], {}, {}
         for k, xb, yb in ps:
             if k not in ("sync", "mixed"):
