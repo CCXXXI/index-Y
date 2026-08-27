@@ -121,9 +121,10 @@ def classify() -> dict:
 
     返回 {pairs_by_rel, complex, new_files, rule_use, touched_rules, head, work}：
     - pairs_by_rel[rel] = [(kind, xblock_or_None, yblock_or_None)]，
-      kind: "sync" / "mixed" / "adopted" / "suspect"
+      kind: "sync" / "mixed" / "adopted" / "rulekilled" / "suspect"
     - rule_use: {(section, ro, rn): {rel, ...}}，收敛判定用到的规则
     - touched_rules: 同构，能命中改动块旧 X 文本的全部规则（s6b 候选超集）
+    - rulekilled_rules: 同构，规则失效型收敛块旧文本命中的规则
     - head/work: 路径 -> bytes（单侧无改动的另一侧以 HEAD 内容充当）
     """
     git("add", "-A")
@@ -154,6 +155,7 @@ def classify() -> dict:
     complex_rels, new_only = [], []
     rule_use: dict[tuple, set] = defaultdict(set)
     touched_rules: dict[tuple, set] = defaultdict(set)
+    rulekilled_rules: dict[tuple, set] = defaultdict(set)
     for rel, d in sorted(groups.items()):
         xp, yp = d.get("X"), d.get("Y")
         if (xp and xp in new_files) or (yp and yp in new_files):
@@ -215,6 +217,17 @@ def classify() -> dict:
             fx, fy = block_frags(xo, xn), block_frags(yo, yn)
             if fx == fy:
                 pairs.append(("sync", (xo, xn), yb))
+            elif xn == yn and not any(re.search(r[1], xn) for r in rules):
+                # 规则失效型收敛：旧 X 命中规则（两侧分叉由规则造成），
+                # 上游改写/消除触发文本后两侧逐字收敛且无规则命中。
+                # 必是 rule 命中旧文本（否则 xo==yo、fx==fy 走 sync 了）
+                fired = [r for r in rules if re.search(r[1], xo)]
+                if fired:
+                    for r in fired:
+                        rulekilled_rules[r].add(rel)
+                    pairs.append(("rulekilled", (xo, xn), yb))
+                    continue
+                pairs.append(("suspect", (xo, xn), yb))
             elif fy < fx:
                 used = []
                 if convergent(vol, xo, xn, fy, used):
@@ -232,7 +245,9 @@ def classify() -> dict:
 
     return {"pairs_by_rel": pairs_by_rel, "complex": complex_rels,
             "new_files": new_only, "rule_use": rule_use,
-            "touched_rules": touched_rules, "head": head, "work": work}
+            "touched_rules": touched_rules,
+            "rulekilled_rules": rulekilled_rules,
+            "head": head, "work": work}
 
 
 def main() -> None:
@@ -246,11 +261,13 @@ def main() -> None:
     n_sync = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "sync")
     n_mixed = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "mixed")
     n_adopted = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "adopted")
+    n_rk = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "rulekilled")
     n_susp = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "suspect")
     print(f"{len(pairs_by_rel):5d}  有文本改动的文件对")
     print(f"{n_sync:5d}  正常同步候选块对（待人工审查）")
     print(f"{n_mixed:5d}  混合块对（片段级拆分：正常同步片段两侧提交）")
     print(f"{n_adopted + n_mixed:5d}  规则采纳块（上游采纳既有规则，留 s6a）")
+    print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，留 s6a）")
     print(f"{n_susp:5d}  疑似上游错误块对（留下）")
     print(f"{len(complex_rels):5d}  复杂（对齐失败，留下）")
     if new_only:
@@ -278,7 +295,8 @@ def main() -> None:
                         f.write(f"[{side}] {rel}\n- {b[0]}\n+ {b[1]}\n\n")
     plan = {
         "summary": {"pairs": len(pairs_by_rel), "sync": n_sync,
-                    "mixed": n_mixed, "adopted": n_adopted, "suspect": n_susp,
+                    "mixed": n_mixed, "adopted": n_adopted,
+                    "rulekilled": n_rk, "suspect": n_susp,
                     "complex": len(complex_rels)},
         "files": {rel: [{"kind": k, "x": xb, "y": yb}
                         for k, xb, yb in ps if k != "sync"]

@@ -214,6 +214,15 @@ def main() -> int:
     commit_paths(f"chore: drop upstream-adopted rules（{len(redundant)} 条）",
                  body, ["x2y.py"])
     print(f"已提交：删除 {len(redundant)} 条冗余规则")
+    # 累积制候选的消费剔除：已删除与已失效（missing）的移出 json，
+    # 仍生效的保留（后续批次相关块落地后可再次验证）
+    consumed = {(c["section"], c["old"], c["new"])
+                for c in redundant} | {(c["section"], c["old"], c["new"])
+                                       for c in missing}
+    left = [c for c in cands
+            if (c["section"], c["old"], c["new"]) not in consumed]
+    with open(cand_path, "w", encoding="utf-8") as f:
+        json.dump(left, f, ensure_ascii=False, indent=1)
     return 0
 
 

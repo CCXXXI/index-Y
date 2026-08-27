@@ -1,14 +1,17 @@
-"""批次 6a：提交 X 侧规则采纳改动（上游采纳既有规则，仅 X 有改动）。
+"""批次 6a：提交规则相关的自动分流块（规则采纳 + 规则失效型收敛）。
 
 无需等人工审查，s5 分类后即可运行；s5 --commit 之后应再跑一遍收尾——
 此时混合块对的正常同步片段已入 HEAD，重跑分类后其 X 侧剩余 diff 退化为
-纯规则采纳块。本脚本只处理 kind == "adopted" 的整块，无需片段级逻辑。
-提交粒度为块：apply_blocks(keep=规则采纳块) 构造中间版本，正常同步候选、
+纯规则采纳块。处理两种 kind：
+- "adopted"：仅 X 有改动的规则采纳块，按块提交 X 侧；
+- "rulekilled"：旧 X 命中规则、上游改写后两侧逐字收敛的块对，成对提交。
+提交粒度为块：apply_blocks(keep=...) 构造中间版本，正常同步候选、
 疑似上游错误块自动留在工作区。
 
-收敛判定（convergent）保证提交后 HEAD 上 x2y(X) == Y 不变式不被破坏。
-同时将 rule_use 导出为 STATE_DIR/adopted_rules.json，供 s6b 验证删除冗余
-规则。用法: uv run python scripts/s6a_commit_adopted_x.py [--dry-run]
+收敛判定（convergent）与 rulekilled 的三重条件保证提交后 HEAD 上
+x2y(X) == Y 不变式不被破坏。s6b 候选规则导出为累积制的
+STATE_DIR/adopted_rules.json（与既有候选合并，s6b 消费后剔除）。
+用法: uv run python scripts/s6a_commit_adopted_x.py [--dry-run]
 """
 
 import json
@@ -33,20 +36,23 @@ def main() -> None:
         print("提示: 存在正常同步候选/混合块，混合块的规则采纳片段需等 "
               "s5 --commit 后再跑本脚本收尾")
 
-    # 导出 s6b 候选：收敛用到的规则 ∪ 命中改动块旧文本的规则
-    # （上游改写源文本为第三种形式致规则失效的情形由后者覆盖）
+    # 导出 s6b 候选（累积制）：既有候选 ∪ 收敛用到的规则 ∪ 命中改动块
+    # 旧文本的规则 ∪ 规则失效型收敛块命中的规则。s6b 消费后剔除已删/失效项。
+    cand_path = os.path.join(STATE_DIR, "adopted_rules.json")
     os.makedirs(STATE_DIR, exist_ok=True)
     cand = defaultdict(set)
-    for src in (r["rule_use"], r["touched_rules"]):
+    if os.path.exists(cand_path):
+        for c in json.load(open(cand_path, encoding="utf-8")):
+            cand[(c["section"], c["old"], c["new"])] |= set(c["rels"])
+    for src in (r["rule_use"], r["touched_rules"], r["rulekilled_rules"]):
         for k, rels in src.items():
             cand[k] |= rels
     adopted_rules = [{"section": sec, "old": ro, "new": rn, "rels": sorted(rels)}
                      for (sec, ro, rn), rels in sorted(cand.items())]
-    with open(os.path.join(STATE_DIR, "adopted_rules.json"), "w",
-              encoding="utf-8") as f:
+    with open(cand_path, "w", encoding="utf-8") as f:
         json.dump(adopted_rules, f, ensure_ascii=False, indent=1)
 
-    fails = committed = 0
+    fails = committed = rk_committed = 0
     for rel, ps in pairs_by_rel.items():
         keep = {tuple(xb) for k, xb, _ in ps if k == "adopted" and xb}
         if not keep:
@@ -83,8 +89,54 @@ def main() -> None:
             with open(xp, "wb") as f:
                 f.write(saved)
         git("add", "-A")
+
+    # 规则失效型收敛块对：成对提交（X/Y 同块，新文本两侧逐字一致）
+    for rel, ps in pairs_by_rel.items():
+        rk = [(tuple(xb), tuple(yb))
+              for k, xb, yb in ps if k == "rulekilled" and xb and yb]
+        if not rk:
+            continue
+        xp, yp = "X/" + rel, "Y/" + rel
+        keepx, keepy = {x for x, _ in rk}, {y for _, y in rk}
+        ix = apply_blocks(head[xp], work[xp], keepx)
+        iy = apply_blocks(head[yp], work[yp], keepy)
+        if ix is None or iy is None:
+            print("  定位歧义，整文件留审:", rel)
+            fails += 1
+            continue
+        gx = chunk_changes(head[xp], ix.encode("utf-8"))
+        gy = chunk_changes(head[yp], iy.encode("utf-8"))
+        if gx is None or gy is None or set(gx) != keepx or set(gy) != keepy:
+            print("  中间版本校验失败，整文件留审:", rel)
+            fails += 1
+            continue
+        terms = [t for t in (term_summary(*xb) for xb, _ in rk) if t]
+        if dry_run:
+            print(f"  [dry-run] {rel}（规则失效收敛 {len(rk)} 块）: "
+                  + "；".join(terms[:3]) + ("…" if len(terms) > 3 else ""))
+            rk_committed += 1
+            continue
+        body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
+        subject = f"fix: sync {rel}（{len(rk)} 处文本修订）"
+        saved = {p: open(p, "rb").read() for p in (xp, yp)}
+        try:
+            with open(xp, "wb") as f:
+                f.write(ix.encode("utf-8"))
+            with open(yp, "wb") as f:
+                f.write(iy.encode("utf-8"))
+            commit_paths(subject, body, [xp, yp])
+            rk_committed += 1
+        except Exception as ex:
+            fails += 1
+            print("  FAIL:", rel, str(ex)[:150])
+        finally:
+            for p, b in saved.items():
+                with open(p, "wb") as f:
+                    f.write(b)
+        git("add", "-A")
     git("add", "-A")
-    print(f"完成。提交 {committed} 个 X 文件，失败/留审 {fails}，"
+    print(f"完成。提交 {committed} 个 X 文件（规则采纳）、"
+          f"{rk_committed} 对（规则失效收敛），失败/留审 {fails}，"
           f"规则候选 {len(adopted_rules)} 条（→ s6b）")
 
 
