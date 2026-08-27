@@ -2,10 +2,23 @@
 
 本文记录「新 X 入仓 + 重跑 x2y.py 后」把海量改动分流为有序 commits 的完整方法。
 
-**各批次已固化为脚本。自动分流先行，人工审查放最后：**
+**全流程已固化为脚本，一键执行（任一步失败即中止；各步幂等可整体重跑）：**
 
 ```bash
-# ===== 全自动 =====
+# ===== 全自动（人工审查前） =====
+uv run python scripts/s0_run_all.py
+
+# ===== 人工审查 =====
+# 审查 review_changes.txt，可疑改动写入 triage_exclude.json
+
+# ===== 审查后收尾（自动） =====
+uv run python scripts/s0_run_all.py --finish
+# 疑似上游错误块留在工作区，整理后人工反馈上游
+```
+
+`s0_run_all.py` 依次调用的单步脚本（调试/单步重跑/`--dry-run` 时用）：
+
+```bash
 uv run python scripts/check_y_freshness.py      # 前置校验：Y == x2y(X)
 uv run python scripts/s1_commit_image_renames.py
 uv run python scripts/s2_commit_image_refs.py
@@ -14,15 +27,7 @@ uv run python scripts/s4_commit_layout.py
 uv run python scripts/s5_triage_text.py                  # 分类 + 导出审查材料
 uv run python scripts/s6a_commit_adopted_x.py            # 规则采纳：提交 X 侧改动
 uv run python scripts/s6b_prune_redundant_rules.py --commit  # 删除已冗余规则
-
-# ===== 人工审查 =====
-# 审查 review_changes.txt，可疑改动写入 triage_exclude.json
-
-# ===== 审查后收尾（自动） =====
-uv run python scripts/s5_triage_text.py --commit         # 提交通过审查的正常同步块
-uv run python scripts/s6a_commit_adopted_x.py   # 收尾混合块退化出的规则采纳
-uv run python scripts/s6b_prune_redundant_rules.py --commit  # 收尾删除对应规则
-# 疑似上游错误块留在工作区，整理后人工反馈上游
+# --finish 等价于：s5 --commit → s6a → s6b --commit
 ```
 
 s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在 `%LOCALAPPDATA%\index-Y-triage\`。
