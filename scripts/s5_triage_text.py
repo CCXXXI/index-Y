@@ -96,18 +96,38 @@ def indexed_changes(old: bytes, new: bytes):
     return out
 
 
-def positional_map(xhead: bytes, yhead: bytes):
-    """旧 X 块索引 → 旧 Y 块索引（允许旧 Y 被规则 1:1 改写）；失败返回 None。"""
+def positional_map(xhead: bytes, yhead: bytes, vol: str | None = None):
+    """旧 X 块索引 → 旧 Y 块索引（允许旧 Y 被规则 1:1 改写）；失败返回 None。
+
+    规则替换文本可注入/消除带文本的标记（如 <ruby><rt>），使 Y 侧块数与
+    X 不等：此类增删块在 HEAD 与工作中等量存在，不影响对齐——但仅在
+    HEAD 上 fixed(X) == Y（换行归一化）成立时容忍（证明增删是规则产物），
+    否则视为真复杂返回 None。被规则消除的 X 块不进入映射（pmap.get → None）。
+    """
     xn = [norm_ws(c) for c in text_chunks(xhead)]
     yn = [norm_ws(c) for c in text_chunks(yhead)]
     sm = difflib.SequenceMatcher(a=xn, b=yn, autojunk=False)
+    ops = sm.get_opcodes()
+    tolerated = []  # insert/delete 组（疑似规则注入/消除的块）
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
+            continue
+        if tag in ("insert", "delete"):
+            tolerated.append(tag)
+            continue
+        return None  # 不等长 replace：真复杂
+    if tolerated:
+        if vol is None:
+            return None
+        xl = xhead.decode("utf-8").replace("\r\n", "\n")
+        yl = yhead.decode("utf-8").replace("\r\n", "\n")
+        if fixed(vol, xl) != yl:
+            return None  # HEAD 不变式不成立，增删块来源无法证明是规则
     m = {}
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+    for tag, i1, i2, j1, j2 in ops:
         if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
             for k in range(i2 - i1):
                 m[i1 + k] = j1 + k
-        else:
-            return None
     return m
 
 
@@ -156,7 +176,13 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
     pairs, gate = [], True
     used_rules, fired_rules = [], []
     for t, i1, i2, j1, j2 in xops:
-        a = pmap[i1] if i1 < len(xoc) else len(yoc)
+        a = pmap.get(i1) if i1 < len(xoc) else len(yoc)
+        if a is None:
+            # 锚点块被规则消除（HEAD 上无 Y 对应块），无法配对 → 疑似
+            pairs.append(("suspect",
+                          ("\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])), None))
+            gate = False
+            continue
         key = (a, t, i2 - i1, j2 - j1)
         xo_s, xn_s = "\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])
         if key not in y_by_key:
@@ -294,7 +320,7 @@ def classify() -> dict:
         structural = xch is None or ych is None
         if not structural and not xch and not ych:
             continue
-        pmap = positional_map(head[xp], head[yp])
+        pmap = positional_map(head[xp], head[yp], vol=rel.split("/")[0])
         if pmap is None:
             complex_rels.append(rel)
             continue
