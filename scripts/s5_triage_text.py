@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib_triage import (TEXT_EXT, CatFile, aligned_chunks, apply_blocks,  # noqa: E402
                         apply_frags, chunk_changes, commit_paths, frag_set,
-                        git, head_sha_map, norm_ws, text_chunks)
+                        git, head_sha_map, norm_ws, raw_variants, text_chunks)
 from s1_commit_image_renames import STATE_DIR  # noqa: E402
 from x2y import fixes, fixed  # noqa: E402
 
@@ -148,6 +148,11 @@ def classify_block(vol: str, rules: list, xo: str, xn: str,
         used: list = []
         if convergent(vol, xo, xn, fy, used):
             return "mixed", used, []  # X 块留下，Y 块提交
+    # Y 侧多出片段：规则因上游编辑获得触发语境（如编辑引入「所以」触发
+    # 由于→因为）。fixed 能分别从新旧 X 文本得到新旧 Y 文本，则两侧差异
+    # 纯属规则渲染、X 改动是真实的上游编辑 → sync
+    if apply_rules(vol, xo) == yo and apply_rules(vol, xn) == yn:
+        return "sync", [], []
     return "suspect", [], []
 
 
@@ -224,6 +229,43 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
                           ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2]))))
             gate = False
     return pairs, gate, used_rules, fired_rules
+
+
+def revert_block_positional(text: str, head_bytes: bytes,
+                            o: str, n: str) -> str | None:
+    """按块序定位还原：在 HEAD→text 的 1:1 replace 中找到 norm 级匹配 (o,n)
+    的唯一块，按其在新文本块序列中的位置顺序扫描定位 raw 形态并替换回 o。
+
+    用于文本过短（如「。」」）无法按字符串唯一性定位的排除块。
+    匹配不唯一或定位失败返回 None。
+    """
+    oc, nc = text_chunks(head_bytes), text_chunks(text.encode("utf-8"))
+    on, nn = [norm_ws(c) for c in oc], [norm_ws(c) for c in nc]
+    sm = difflib.SequenceMatcher(a=on, b=nn, autojunk=False)
+    targets = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag != "replace" or (i2 - i1) != (j2 - j1):
+            continue
+        for oi, nj in zip(range(i1, i2), range(j1, j2)):
+            if on[oi] == o and nn[nj] == n:
+                targets.append(nj)
+    if len(targets) != 1:
+        return None
+    nj = targets[0]
+    pos = 0
+    for idx, chunk in enumerate(nc):
+        cands = [(text.find(v, pos), k)
+                 for k, v in enumerate(raw_variants(chunk))
+                 if v and text.find(v, pos) >= 0]
+        if not cands:
+            return None
+        p, k = min(cands)
+        v = raw_variants(chunk)[k]
+        if idx == nj:
+            ovs = raw_variants(o)
+            return text[:p] + ovs[min(k, len(ovs) - 1)] + text[p + len(v):]
+        pos = p + len(v)
+    return None
 
 
 def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
@@ -470,34 +512,94 @@ def main() -> None:
     committed_rels = 0
     for rel, ps in pairs_by_rel.items():
         if rel in structural_ok:
-            # 结构文件：无法按块拆分，全 sync/rulekilled 且无排除时整文件成对提交
-            if any((xb and xb in excludes) or (yb and yb in excludes)
-                   for _, xb, yb in ps):
-                print("  结构文件含被排除块，整文件留审:", rel)
+            # 结构文件：结构组（增删/N→M）无法按块还原，其余按块对提交——
+            # 被排除的 1:1 块在两侧工作区文本上还原回 HEAD 旧文本后提交中间
+            # 版本（与纯 1:1 文件的排除语义一致：错误块留在工作区等上游修复）
+            ex_pairs = [(xb, yb) for _, xb, yb in ps
+                        if (xb and xb in excludes) or (yb and yb in excludes)]
+            if any(xb is None or yb is None
+                   or not xb[0] or not xb[1] or not yb[0] or not yb[1]
+                   or "\n" in xb[0] or "\n" in xb[1]
+                   for xb, yb in ex_pairs):
+                print("  结构文件的结构组命中排除（无法按块还原），整文件留审:", rel)
                 fails += 1
                 continue
             xp, yp = "X/" + rel, "Y/" + rel
             vol = rel.split("/")[0]
-            # 不变式校验（与 check_y_freshness 同语义：换行归一化后
+            inter, ok = {}, True
+            for p, side in ((xp, 0), (yp, 1)):
+                text = work[p].decode("utf-8")
+                # 同一文本的排除块可能多处出现：出现次数与排除次数相等时
+                # 说明所有出现都是被排除块，可安全地全部还原
+                groups = Counter((xb, yb)[side] for xb, yb in ex_pairs)
+                for (o, n), m in groups.items():
+                    nvs, ovs = raw_variants(n), raw_variants(o)
+                    hit = next((k for k, v in enumerate(nvs)
+                                if v and text.count(v) == m), None)
+                    if hit is not None:
+                        text = text.replace(nvs[hit], ovs[hit])
+                        continue
+                    # 文本过短无法按唯一性定位：按块序定位（排除块在
+                    # HEAD→中间版的 1:1 replace 中须唯一）
+                    r = revert_block_positional(text, head[p], o, n)
+                    if r is None:
+                        ok = False
+                        break
+                    text = r
+                if not ok:
+                    break
+                inter[p] = text
+            if not ok:
+                print("  被排除块定位歧义，整文件留审:", rel)
+                fails += 1
+                continue
+            # 校验 1：还原后两侧块多重集差异恰好是被排除对
+            for p, side in ((xp, 0), (yp, 1)):
+                wc = Counter(norm_ws(c) for c in text_chunks(work[p]))
+                ic = Counter(norm_ws(c)
+                             for c in text_chunks(inter[p].encode("utf-8")))
+                want_o, want_n = Counter(), Counter()
+                for xb, yb in ex_pairs:
+                    b = (xb, yb)[side]
+                    want_o[b[0]] += 1
+                    want_n[b[1]] += 1
+                if ic - wc != want_o or wc - ic != want_n:
+                    ok = False
+            if not ok:
+                print("  中间版本校验失败，整文件留审:", rel)
+                fails += 1
+                continue
+            # 校验 2：不变式（与 check_y_freshness 同语义：换行归一化后
             # fixed(X) == Y；x2y 写出的 Y 与上游 X 换行风格可能不同）
-            xtxt = work[xp].decode("utf-8").replace("\r\n", "\n")
-            ytxt = work[yp].decode("utf-8").replace("\r\n", "\n")
+            xtxt = inter[xp].replace("\r\n", "\n")
+            ytxt = inter[yp].replace("\r\n", "\n")
             if fixed(vol, xtxt) != ytxt:
                 print("  fixed(X) != Y，不变式不满足，整文件留审:", rel)
                 fails += 1
                 continue
-            paths = [p for p in (xp, yp) if head[p] != work[p]]
-            terms = [group_summary(o, n) for k, (o, n), _ in
-                     (p for p in ps if p[1])]
-            terms = [t for t in terms if t]
+            excluded_xbs = {xb for xb, _ in ex_pairs}
+            terms = [t for t in (group_summary(xb[0], xb[1])
+                                 for _, xb, _ in ps
+                                 if xb and xb not in excluded_xbs) if t]
+            n_commit = len(ps) - len(ex_pairs)
             body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
+            paths = [p for p in (xp, yp) if head[p] != work[p]]
+            saved = {}
             try:
-                commit_paths(f"fix: sync {rel}（{len(ps)} 处文本修订）",
+                for p in paths:
+                    saved[p] = open(p, "rb").read()
+                    with open(p, "wb") as f:
+                        f.write(inter[p].encode("utf-8"))
+                commit_paths(f"fix: sync {rel}（{n_commit} 处文本修订）",
                              body, paths)
                 committed_rels += 1
             except Exception as ex:
                 fails += 1
                 print("  FAIL:", rel, str(ex)[:150])
+            finally:
+                for p, b in saved.items():
+                    with open(p, "wb") as f:
+                        f.write(b)
             git("add", "-A")
             continue
         keepx, keepy, partx, partn = [], [], {}, {}
