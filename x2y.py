@@ -815,7 +815,7 @@ def fixed(vol: str, content: str) -> str:
 def x2y():
     x, y = Path("X"), Path("Y")
     shutil.rmtree(y)
-    for vol in tqdm(list(x.iterdir())):
+    for vol in tqdm(list(x.iterdir()), "x2y"):
         shutil.copytree(vol, y / vol.name)
         for file in (y / vol.name).rglob("*"):
             if file.suffix not in (".xhtml", ".opf", ".ncx"):

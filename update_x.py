@@ -13,6 +13,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from tqdm import tqdm
+
 from x2y import x2y
 
 
@@ -26,9 +28,8 @@ def main() -> None:
         epubs = [n for n in outer.namelist() if n.lower().endswith(".epub")]
         if not epubs:
             sys.exit(f"错误：{zip_path} 中没有 epub 文件")
-        print(f"{zip_path.name}：共 {len(epubs)} 个 epub")
 
-        for name in epubs:
+        for name in tqdm(epubs, "解压"):
             vol = Path(name).stem
             target = x_dir / vol
             # 先解压到临时目录并校验，确认无误后再替换，避免解压失败时旧版已被删除
@@ -42,11 +43,8 @@ def main() -> None:
                 if existed:
                     shutil.rmtree(target)
                 shutil.move(str(staging), target)
-            print(f"{'更新' if existed else '新增'}：{vol}")
 
-    print("重跑 x2y.py …")
     x2y()
-    print("完成。")
 
 
 if __name__ == "__main__":
