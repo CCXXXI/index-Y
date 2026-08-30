@@ -13,7 +13,7 @@
 
 默认只报告；--commit 才修改 x2y.py 并提交（单个 commit），提交前做全树
 差分复核（新旧管道输出逐字节一致）。
-用法: uv run python scripts/s6b_prune_redundant_rules.py [--commit]
+用法: uv run python scripts/sync/s6b_prune_redundant_rules.py [--commit]
 """
 
 import ast
@@ -29,7 +29,7 @@ from lib_triage import TEXT_EXT, CatFile, commit_paths, head_sha_map, repo_root 
 from s1_commit_image_renames import STATE_DIR  # noqa: E402
 from x2y import NON_END, fixes  # noqa: E402
 
-X2Y = os.path.join(repo_root(), "x2y.py")
+X2Y = os.path.join(repo_root(), "scripts", "x2y.py")
 
 
 def rule_nodes():
@@ -212,7 +212,7 @@ def main() -> int:
     body = "\n".join(f"- [{c['section']}] {c['old']} -> {c['new']}"
                      for c in redundant)
     commit_paths(f"chore: drop upstream-adopted rules（{len(redundant)} 条）",
-                 body, ["x2y.py"])
+                 body, ["scripts/x2y.py"])
     print(f"已提交：删除 {len(redundant)} 条冗余规则")
     # 累积制候选的消费剔除：已删除与已失效（missing）的移出 json，
     # 仍生效的保留（后续批次相关块落地后可再次验证）

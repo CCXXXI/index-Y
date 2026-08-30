@@ -4,7 +4,7 @@
 --finish（人工审查后）：s5 --commit → s6a → s6b --commit 收尾。
 
 任一脚本失败即中止。各步骤本身幂等，可整体重跑。
-用法: uv run python scripts/s0_run_all.py [--finish]
+用法: uv run python scripts/sync/s0_run_all.py [--finish]
 """
 
 import os

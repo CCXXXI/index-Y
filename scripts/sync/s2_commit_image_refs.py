@@ -2,7 +2,7 @@
 
 读取批次 1 写出的 rename 映射，对每个修改的文本文件生成「HEAD + 仅图片名替换」
 的中间版本写入索引。校验：暂存 diff 的每个删除行都含旧图名、新增行不含旧名。
-用法: uv run python scripts/s2_commit_image_refs.py [--dry-run]
+用法: uv run python scripts/sync/s2_commit_image_refs.py [--dry-run]
 """
 
 import json

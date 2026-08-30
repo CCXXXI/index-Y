@@ -1,7 +1,7 @@
 """批次 1：图片重命名 → 单个 commit。
 
 把暂存的 rename 中的图片项单独提交；rename 映射写入共享状态目录供批次 2 使用。
-用法: uv run python scripts/s1_commit_image_renames.py [--dry-run]
+用法: uv run python scripts/sync/s1_commit_image_renames.py [--dry-run]
 """
 
 import json

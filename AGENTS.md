@@ -3,12 +3,13 @@
 ## 项目结构
 
 - `X/`：上游 [index-X](https://github.com/1204244136/index-X)（粉丝校对版）的快照，上游持续更新。
-- `x2y.py`：X → Y 的转换脚本（AI 辅助校正的规则集，`fixes` 词典 + 少量正则规则）。
-- `Y/`：对 X 运行 `x2y.py` 的产物。Y 的一切内容都由 X 派生，不直接编辑。
+- `scripts/x2y.py`：X → Y 的转换脚本（AI 辅助校正的规则集，`fixes` 词典 + 少量正则规则）。
+- `Y/`：对 X 运行 `scripts/x2y.py` 的产物。Y 的一切内容都由 X 派生，不直接编辑。
+- `scripts/`：工具脚本（`x2y.py`、`update_x.py`、`tag.py`）；`scripts/sync/` 为同步分流系列（s0~s6b + 共用库）。
 
 ## 同步上游的工作流
 
-上游 X 更新后：运行 `uv run update_x.py <下载的 zip>`（自动解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`；支持完整下载或部分挑选的 zip），然后把产生的海量改动**分流提交**。
+上游 X 更新后：运行 `uv run python scripts/update_x.py <下载的 zip>`（自动解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`；支持完整下载或部分挑选的 zip），然后把产生的海量改动**分流提交**。
 
 ### 分流三类规则
 

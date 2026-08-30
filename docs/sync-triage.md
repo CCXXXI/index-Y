@@ -6,27 +6,27 @@
 
 ```bash
 # ===== 全自动（人工审查前） =====
-uv run python scripts/s0_run_all.py
+uv run python scripts/sync/s0_run_all.py
 
 # ===== 人工审查 =====
 # 审查 review_changes.txt，可疑改动写入 triage_exclude.json
 
 # ===== 审查后收尾（自动） =====
-uv run python scripts/s0_run_all.py --finish
+uv run python scripts/sync/s0_run_all.py --finish
 # 疑似上游错误块留在工作区，整理后人工反馈上游
 ```
 
 `s0_run_all.py` 依次调用的单步脚本（调试/单步重跑/`--dry-run` 时用）：
 
 ```bash
-uv run python scripts/check_y_freshness.py      # 前置校验：Y == x2y(X)
-uv run python scripts/s1_commit_image_renames.py
-uv run python scripts/s2_commit_image_refs.py
-uv run python scripts/s3_commit_pure_formatting.py
-uv run python scripts/s4_commit_layout.py
-uv run python scripts/s5_triage_text.py                  # 分类 + 导出审查材料
-uv run python scripts/s6a_commit_adopted_x.py            # 规则采纳：提交 X 侧改动
-uv run python scripts/s6b_prune_redundant_rules.py --commit  # 删除已冗余规则
+uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X)
+uv run python scripts/sync/s1_commit_image_renames.py
+uv run python scripts/sync/s2_commit_image_refs.py
+uv run python scripts/sync/s3_commit_pure_formatting.py
+uv run python scripts/sync/s4_commit_layout.py
+uv run python scripts/sync/s5_triage_text.py                  # 分类 + 导出审查材料
+uv run python scripts/sync/s6a_commit_adopted_x.py            # 规则采纳：提交 X 侧改动
+uv run python scripts/sync/s6b_prune_redundant_rules.py --commit  # 删除已冗余规则
 # --finish 等价于：s5 --commit → s6a → s6b --commit
 ```
 
@@ -41,7 +41,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 - 症状：`diff` 桶（两侧不一致）异常多；「仅 X 改动」异常多；抽查发现 Y 缺 DOCTYPE/新图名/上游文本修订。
 - 根因：x2y.py 的输出 = `copytree(X)` + fixes，X 若在跑完后又更新，Y 即滞后。
 - 验证：用 `regex` 模块（规则含 `\p{}`，stdlib `re` 不支持）复算 `fixed(vol, X内容)` 与 Y 文件对比。
-- 处理：`uv run python x2y.py` 重跑后重新走全流程。之前的提交无需重做——各批次的校验逻辑（机械变换逐行验证、改动集完全相等才准入）保证滞后只会造成漏收、不会造成错收。
+- 处理：`uv run python scripts/x2y.py` 重跑后重新走全流程。之前的提交无需重做——各批次的校验逻辑（机械变换逐行验证、改动集完全相等才准入）保证滞后只会造成漏收、不会造成错收。
 - 注意：重跑后 Y 树会涌现整批机械改动（图片重命名、格式 wave），按批次 1-4 同样处理即可。
 
 ## 1. 通用 git 操作坑（本仓库路径含中文与方括号）

@@ -11,7 +11,7 @@
 收敛判定（convergent）与 rulekilled 的三重条件保证提交后 HEAD 上
 x2y(X) == Y 不变式不被破坏。s6b 候选规则导出为累积制的
 STATE_DIR/adopted_rules.json（与既有候选合并，s6b 消费后剔除）。
-用法: uv run python scripts/s6a_commit_adopted_x.py [--dry-run]
+用法: uv run python scripts/sync/s6a_commit_adopted_x.py [--dry-run]
 """
 
 import json

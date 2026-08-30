@@ -1,4 +1,4 @@
-"""用法：uv run update_x.py <上游下载的 zip 路径>
+"""用法：uv run python scripts/update_x.py <上游下载的 zip 路径>
 
 同步上游 X 版的完整流程：
 1. 解压 zip，找到其中所有 epub（支持完整下载或部分挑选两种情况）；

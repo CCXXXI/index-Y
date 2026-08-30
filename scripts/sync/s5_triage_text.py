@@ -31,7 +31,7 @@
 1) 默认模式：分类并导出审查材料（STATE_DIR/review_changes.txt = 正常同步候选块、
    suspect_changes.txt = 疑似上游错误块、plan.json = 逐文件块对明细）。
 2) --commit：提交未被排除的正常同步块。
-用法: uv run python scripts/s5_triage_text.py [--commit]
+用法: uv run python scripts/sync/s5_triage_text.py [--commit]
 """
 
 import difflib

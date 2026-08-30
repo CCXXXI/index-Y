@@ -4,7 +4,7 @@
 - 文本内容（空白归一化）完全一致
 - 标签属性多重集合一致
 - 事件序列一致，仅允许「无属性 <p> 包裹 <img>」的增减
-用法: uv run python scripts/s3_commit_pure_formatting.py [--dry-run]
+用法: uv run python scripts/sync/s3_commit_pure_formatting.py [--dry-run]
 """
 
 import os

@@ -1,8 +1,8 @@
 """前置校验：确认 Y 树与当前 X 同步（Y == x2y(X)）。
 
 分流前必须跑。Y 滞后会让「两侧不一致」「仅 X 改动」桶系统性失真。
-用法: uv run python scripts/check_y_freshness.py
-退出码 0 = 新鲜；1 = 存在滞后文件（需 uv run python x2y.py 后重新分流）。
+用法: uv run python scripts/sync/check_y_freshness.py
+退出码 0 = 新鲜；1 = 存在滞后文件（需 uv run python scripts/x2y.py 后重新分流）。
 """
 
 import os
@@ -50,7 +50,7 @@ def main() -> int:
             print(f"  {why}: {rel}")
         if len(stale) > 20:
             print(f"  ... 共 {len(stale)} 个")
-        print("请先运行: uv run python x2y.py")
+        print("请先运行: uv run python scripts/x2y.py")
         return 1
     print("Y 与当前 X 同步 ✓")
     return 0
