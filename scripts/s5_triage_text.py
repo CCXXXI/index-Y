@@ -15,7 +15,9 @@
                                              X 侧片段级拆分，正常同步片段提交、
                                              规则采纳片段留下（两侧提交保持对称，
                                              HEAD 上 x2y(X) == Y 不变式不被破坏）
-   - 仅 X 有改动且能收敛                   → 规则采纳（"adopted"，留 s6a）
+   - 仅 X 有改动且能收敛（或规则管道等价：apply_rules 后新旧 X 文本一致，
+     即上游改动整个落在规则覆盖内、fixed 后 Y 不变——覆盖多步推导这类
+     片段级收敛看不见的情形）       → 规则采纳（"adopted"，留 s6a）
    - 其余（Y 有多余片段 / 仅 Y 有改动 / 不收敛）→ 疑似上游错误（"suspect"，留下）
    片段级比较是必要的：旧 Y 的同一句子可能已被 x2y 规则改过，
    块字面不同不代表改动不同；但只做全局片段集比较会把「同碎片的另一处
@@ -197,8 +199,7 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
                 for k in range(i2 - i1):
                     xo, xn = xoc[i1 + k], xnc[j1 + k]
                     used: list = []
-                    kind = ("adopted" if convergent(vol, xo, xn, set(), used)
-                            else "suspect")
+                    kind = xonly_kind(vol, xo, xn, used)
                     used_rules += used
                     pairs.append((kind, (xo, xn), None))
             else:
@@ -266,6 +267,18 @@ def revert_block_positional(text: str, head_bytes: bytes,
             return text[:p] + ovs[min(k, len(ovs) - 1)] + text[p + len(v):]
         pos = p + len(v)
     return None
+
+
+def xonly_kind(vol: str, xo: str, xn: str, used: list) -> str:
+    """仅 X 有改动的块的分类：片段收敛 → 规则采纳；规则管道等价
+    （apply_rules 后新旧文本一致，即上游改动整个落在规则覆盖范围内，
+    fixed 后 Y 不受影响）也是规则采纳——覆盖多步推导（如 `….` 先去点
+    再双写省略号得到 `……`）这类片段级收敛看不见的情形。其余 → 疑似。"""
+    if convergent(vol, xo, xn, set(), used):
+        return "adopted"
+    if apply_rules(vol, xo) == apply_rules(vol, xn):
+        return "adopted"
+    return "suspect"
 
 
 def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
@@ -401,8 +414,7 @@ def classify() -> dict:
             yb = y_by_oi.get(pmap.get(oi))
             if yb is None:
                 used: list = []
-                kind = "adopted" if convergent(vol, xo, xn, set(), used) \
-                    else "suspect"
+                kind = xonly_kind(vol, xo, xn, used)
                 for r in used:
                     rule_use[r].add(rel)
                 pairs.append((kind, (xo, xn), None))
