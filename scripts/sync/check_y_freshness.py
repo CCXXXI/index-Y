@@ -9,10 +9,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_triage import TEXT_EXT, repo_root  # noqa: E402
-from x2y import fixes  # noqa: E402  复用规则表，fixed() 的逻辑在下面对 bytes 重写
-
-import regex as re  # noqa: E402  规则含 \p{}，stdlib re 不支持
+import regex as re
+from lib_triage import TEXT_EXT, repo_root
+from x2y import fixes
 
 
 def fixed(vol: str, content: str) -> str:

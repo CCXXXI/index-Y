@@ -11,7 +11,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import (TEXT_EXT, CatFile, git, head_sha_map, is_pure_formatting)  # noqa: E402
+from lib_triage import (
+    TEXT_EXT,
+    CatFile,
+    git,
+    head_sha_map,
+    is_pure_formatting,
+)
 
 
 def main() -> None:
@@ -28,10 +34,11 @@ def main() -> None:
     passed = []
     for path in cands:
         try:
-            if is_pure_formatting(cf.read(hm[path]),
-                                  open(os.path.join(os.getcwd(), path), "rb").read()):
+            with open(os.path.join(os.getcwd(), path), "rb") as f:
+                cur = f.read()
+            if is_pure_formatting(cf.read(hm[path]), cur):
                 passed.append(path)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass  # 解析失败一律留审
     cf.close()
     print(f"纯格式化 {len(passed)}")

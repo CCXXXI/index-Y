@@ -44,11 +44,23 @@ import regex as re  # 规则含 \p{}，stdlib re 不支持
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_triage import (TEXT_EXT, CatFile, aligned_chunks, apply_blocks,  # noqa: E402
-                        apply_frags, chunk_changes, commit_paths, frag_set,
-                        git, head_sha_map, norm_ws, raw_variants, text_chunks)
-from s1_commit_image_renames import STATE_DIR  # noqa: E402
-from x2y import fixes, fixed  # noqa: E402
+from lib_triage import (
+    TEXT_EXT,
+    CatFile,
+    aligned_chunks,
+    apply_blocks,
+    apply_frags,
+    chunk_changes,
+    commit_paths,
+    frag_set,
+    git,
+    head_sha_map,
+    norm_ws,
+    raw_variants,
+    text_chunks,
+)
+from s1_commit_image_renames import STATE_DIR
+from x2y import fixed, fixes
 
 
 def apply_rules(vol: str, s: str) -> str:
@@ -333,7 +345,8 @@ def classify() -> dict:
             new_files.add(path)
             continue
         head[path] = cf.read(hm[path])
-        work[path] = open(path, "rb").read()
+        with open(path, "rb") as f:
+            work[path] = f.read()
     cf.close()
 
     groups = defaultdict(dict)
@@ -476,8 +489,7 @@ def main() -> None:
                 agg[xb] += 1
     with open(os.path.join(STATE_DIR, "review_changes.txt"), "w",
               encoding="utf-8") as f:
-        for (o, n), c in agg.most_common():
-            f.write(f"[{c}次]\n- {o}\n+ {n}\n\n")
+        f.writelines(f"[{c}次]\n- {o}\n+ {n}\n\n" for (o, n), c in agg.most_common())
     with open(os.path.join(STATE_DIR, "suspect_changes.txt"), "w",
               encoding="utf-8") as f:
         for rel, ps in pairs_by_rel.items():
@@ -502,8 +514,8 @@ def main() -> None:
         "adopted_rules": {f"{sec}: {ro} -> {rn}": sorted(rels)
                        for (sec, ro, rn), rels in sorted(rule_use.items())},
     }
-    json.dump(plan, open(os.path.join(STATE_DIR, "plan.json"), "w",
-                         encoding="utf-8"), ensure_ascii=False, indent=1)
+    with open(os.path.join(STATE_DIR, "plan.json"), "w", encoding="utf-8") as f:
+        json.dump(plan, f, ensure_ascii=False, indent=1)
     print(f"审查材料: {os.path.join(STATE_DIR, 'review_changes.txt')}"
           f"（{sum(agg.values())} 块 / 去重 {len(agg)}）")
     if n_susp:
@@ -517,7 +529,8 @@ def main() -> None:
     excl_path = os.path.join(STATE_DIR, "triage_exclude.json")
     excludes = set()
     if os.path.exists(excl_path):
-        excludes = {tuple(x) for x in json.load(open(excl_path, encoding="utf-8"))}
+        with open(excl_path, encoding="utf-8") as f:
+            excludes = {tuple(x) for x in json.load(f)}
         print(f"排除规则 {len(excludes)} 条（按块对生效）")
 
     fails = 0
@@ -599,13 +612,14 @@ def main() -> None:
             saved = {}
             try:
                 for p in paths:
-                    saved[p] = open(p, "rb").read()
+                    with open(p, "rb") as f:
+                        saved[p] = f.read()
                     with open(p, "wb") as f:
                         f.write(inter[p].encode("utf-8"))
                 commit_paths(f"fix: sync {rel}（{n_commit} 处文本修订）",
                              body, paths)
                 committed_rels += 1
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
                 fails += 1
                 print("  FAIL:", rel, str(ex)[:150])
             finally:
@@ -675,12 +689,13 @@ def main() -> None:
         saved = {}
         try:
             for p in paths:
-                saved[p] = open(p, "rb").read()
+                with open(p, "rb") as f:
+                    saved[p] = f.read()
                 with open(p, "wb") as f:
                     f.write(inter[p].encode("utf-8"))
             commit_paths(subject, body, paths)
             committed_rels += 1
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
             fails += 1
             print("  FAIL:", rel, str(ex)[:150])
         finally:

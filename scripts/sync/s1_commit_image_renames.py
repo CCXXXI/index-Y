@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import (IMG_EXT, commit_paths, git, repo_root, staged_renames)  # noqa: E402
+from lib_triage import IMG_EXT, git, staged_renames
 
 STATE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "/tmp"), "index-Y-triage")
 
@@ -31,8 +31,10 @@ def main() -> None:
     # 与已有映射合并（X/Y 两树的 rename 可能分属不同批次）
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if os.path.exists(map_path):
-        m = {**json.load(open(map_path, encoding="utf-8")), **m}
-    json.dump(m, open(map_path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        with open(map_path, encoding="utf-8") as f:
+            m = {**json.load(f), **m}
+    with open(map_path, "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False, indent=1)
 
     if not img:
         print("无图片重命名")

@@ -25,9 +25,15 @@ import regex as re  # 规则含 \p{}，stdlib re 不支持
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_triage import TEXT_EXT, CatFile, commit_paths, head_sha_map, repo_root  # noqa: E402
-from s1_commit_image_renames import STATE_DIR  # noqa: E402
-from x2y import NON_END, fixes  # noqa: E402
+from lib_triage import (
+    TEXT_EXT,
+    CatFile,
+    commit_paths,
+    head_sha_map,
+    repo_root,
+)
+from s1_commit_image_renames import STATE_DIR
+from x2y import NON_END, fixes
 
 X2Y = os.path.join(repo_root(), "scripts", "x2y.py")
 
@@ -37,7 +43,8 @@ def rule_nodes():
 
     对 Tuple 节点 eval 求值（命名空间只给 NON_END），兼容字面值与 rf 串。
     """
-    tree = ast.parse(open(X2Y, encoding="utf-8").read())
+    with open(X2Y, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
     out = {}
     for node in ast.walk(tree):
         target = None
@@ -62,8 +69,8 @@ def rule_nodes():
                 try:
                     val = eval(compile(ast.Expression(elt), X2Y, "eval"),
                                {"NON_END": NON_END})
-                except Exception:
-                    continue
+                except Exception:  # noqa: BLE001, S112
+                    continue  # 求值失败（非常量表达式等）的规则不索引
                 out.setdefault((k.value, *val), []).append(
                     (elt.lineno, elt.end_lineno))
     return out
@@ -123,7 +130,8 @@ def main() -> int:
     if not os.path.exists(cand_path):
         print("无候选：先运行 s6a_commit_adopted_x.py")
         return 1
-    cands = json.load(open(cand_path, encoding="utf-8"))
+    with open(cand_path, encoding="utf-8") as f:
+        cands = json.load(f)
 
     nodes = rule_nodes()
     files = x_text_files()
@@ -142,8 +150,8 @@ def main() -> int:
         for vol in vols:
             for rel in files.get(vol, []):
                 # 工作区与 HEAD 两侧都要不触发/输出不变
-                contents = [open(os.path.join(root, "X", rel),
-                                 encoding="utf-8").read()]
+                with open(os.path.join(root, "X", rel), encoding="utf-8") as fp:
+                    contents = [fp.read()]
                 sha = hm.get("X/" + rel.replace(os.sep, "/"))
                 if sha:
                     contents.append(cf.read(sha).decode("utf-8"))
@@ -176,7 +184,8 @@ def main() -> int:
         print("\n确认后带 --commit 运行以删除并提交")
         return 0
 
-    lines = open(X2Y, encoding="utf-8").readlines()
+    with open(X2Y, encoding="utf-8") as f:
+        lines = f.readlines()
     spans = sorted((nodes[(c["section"], c["old"], c["new"])][0]
                     for c in redundant), reverse=True)
     for lo, hi in spans:
@@ -188,6 +197,7 @@ def main() -> int:
     # 旧管道逐字节一致（差分校验）。不直接比 Y：HEAD 可能存在分流中途的
     # 既有不对称（如 Y 侧待提交文件），与本次删除无关。
     import importlib
+
     import x2y
     importlib.reload(x2y)
     bad = 0
@@ -195,8 +205,8 @@ def main() -> int:
     for vol, rels in files.items():
         for rel in rels:
             p = rel.replace(os.sep, "/")
-            contents = [open(os.path.join(root, "X", rel),
-                             encoding="utf-8").read()]
+            with open(os.path.join(root, "X", rel), encoding="utf-8") as fp:
+                contents = [fp.read()]
             sha = hm.get("X/" + p)
             if sha:
                 contents.append(cf.read(sha).decode("utf-8"))

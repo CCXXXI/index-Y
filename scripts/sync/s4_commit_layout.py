@@ -9,8 +9,16 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import (TEXT_EXT, CatFile, git, head_sha_map, norm_ws,
-                        revert_text_chunks, stage_content, text_chunks)  # noqa: E402
+from lib_triage import (
+    TEXT_EXT,
+    CatFile,
+    git,
+    head_sha_map,
+    norm_ws,
+    revert_text_chunks,
+    stage_content,
+    text_chunks,
+)
 
 
 def main() -> None:
@@ -27,11 +35,12 @@ def main() -> None:
     to_stage, text_only, left = [], [], []
     for path in cands:
         old_t = cf.read(hm[path]).decode("utf-8")
-        new_t = open(os.path.join(os.getcwd(), path), encoding="utf-8").read()
+        with open(os.path.join(os.getcwd(), path), encoding="utf-8") as f:
+            new_t = f.read()
         try:
             staged = revert_text_chunks(old_t, new_t)
-        except Exception:
-            staged = None
+        except Exception:  # noqa: BLE001
+            staged = None  # 解析失败一律留审
         if staged is None:
             left.append(path)
         elif staged == old_t:

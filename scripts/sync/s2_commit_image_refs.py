@@ -11,8 +11,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import (TEXT_EXT, CatFile, git, head_sha_map, stage_content)  # noqa: E402
-from s1_commit_image_renames import STATE_DIR  # noqa: E402
+from lib_triage import TEXT_EXT, CatFile, git, head_sha_map, stage_content
+from s1_commit_image_renames import STATE_DIR
 
 
 def main() -> None:
@@ -20,7 +20,8 @@ def main() -> None:
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if not os.path.exists(map_path):
         raise SystemExit(f"缺少 {map_path}，请先运行 s1_commit_image_renames.py")
-    renames = json.load(open(map_path, encoding="utf-8"))
+    with open(map_path, encoding="utf-8") as f:
+        renames: dict[str, str] = json.load(f)
     print(f"映射 {len(renames)} 条")
     if not renames:
         return
@@ -60,9 +61,9 @@ def main() -> None:
         if line.startswith("-") and not line.startswith("---"):
             if not any(k in line for k in renames):
                 bad += 1
-        elif line.startswith("+") and not line.startswith("+++"):
-            if any(k in line for k in renames):
-                bad += 1
+        elif (line.startswith("+") and not line.startswith("+++")
+              and any(k in line for k in renames)):
+            bad += 1
     assert bad == 0, f"暂存区含 {bad} 行非图片路径变更，中止"
     git("commit", "-q", "-m", "refactor: update image references for renamed files")
     git("add", "-A")

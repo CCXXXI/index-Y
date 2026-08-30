@@ -16,7 +16,8 @@ SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
 def run(script: str, *args: str) -> None:
     print(f"\n===== {script} {' '.join(args)} =====", flush=True)
-    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, script), *args])
+    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, script), *args],
+                       check=False)
     if r.returncode != 0:
         raise SystemExit(f"{script} 失败（exit {r.returncode}），中止")
 

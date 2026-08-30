@@ -21,9 +21,9 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_triage import apply_blocks, chunk_changes, commit_paths, git  # noqa: E402
-from s1_commit_image_renames import STATE_DIR  # noqa: E402
-from s5_triage_text import classify, term_summary  # noqa: E402
+from lib_triage import apply_blocks, chunk_changes, commit_paths, git
+from s1_commit_image_renames import STATE_DIR
+from s5_triage_text import classify, term_summary
 
 
 def main() -> None:
@@ -43,8 +43,9 @@ def main() -> None:
     os.makedirs(STATE_DIR, exist_ok=True)
     cand = defaultdict(set)
     if os.path.exists(cand_path):
-        for c in json.load(open(cand_path, encoding="utf-8")):
-            cand[(c["section"], c["old"], c["new"])] |= set(c["rels"])
+        with open(cand_path, encoding="utf-8") as f:
+            for c in json.load(f):
+                cand[(c["section"], c["old"], c["new"])] |= set(c["rels"])
     for src in (r["rule_use"], r["touched_rules"], r["rulekilled_rules"]):
         for k, rels in src.items():
             cand[k] |= rels
@@ -79,13 +80,14 @@ def main() -> None:
             continue
         body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
         subject = f"fix: sync X/{rel}（上游采纳规则，{len(got)} 处）"
-        saved = open(xp, "rb").read()
+        with open(xp, "rb") as f:
+            saved = f.read()
         try:
             with open(xp, "wb") as f:
                 f.write(inter.encode("utf-8"))
             commit_paths(subject, body, [xp])
             committed += 1
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
             fails += 1
             print("  FAIL:", rel, str(ex)[:150])
         finally:
@@ -123,7 +125,10 @@ def main() -> None:
             continue
         body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
         subject = f"fix: sync {rel}（{len(rk)} 处文本修订）"
-        saved = {p: open(p, "rb").read() for p in (xp, yp)}
+        saved = {}
+        for p in (xp, yp):
+            with open(p, "rb") as f:
+                saved[p] = f.read()
         try:
             with open(xp, "wb") as f:
                 f.write(ix.encode("utf-8"))
@@ -131,7 +136,7 @@ def main() -> None:
                 f.write(iy.encode("utf-8"))
             commit_paths(subject, body, [xp, yp])
             rk_committed += 1
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
             fails += 1
             print("  FAIL:", rel, str(ex)[:150])
         finally:

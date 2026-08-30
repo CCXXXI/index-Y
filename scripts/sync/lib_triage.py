@@ -28,7 +28,7 @@ def repo_root() -> str:
 
 def git(*args: str, input_bytes: bytes | None = None) -> bytes:
     r = subprocess.run(["git", *args], cwd=repo_root(), input=input_bytes,
-                       capture_output=True, env=ENV)
+                       capture_output=True, env=ENV, check=False)
     if r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)}: "
                            f"{r.stderr.decode('utf-8', 'replace')[:500]}")
@@ -79,17 +79,20 @@ class CatFile:
         self.p = subprocess.Popen(["git", "cat-file", "--batch"],
                                   cwd=repo_root(), env=ENV,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        pin, pout = self.p.stdin, self.p.stdout
+        assert pin is not None and pout is not None  # PIPE 已指定
+        self._in, self._out = pin, pout
 
     def read(self, sha: str) -> bytes:
-        self.p.stdin.write(sha.encode() + b"\n")
-        self.p.stdin.flush()
-        header = self.p.stdout.readline().split()
-        data = self.p.stdout.read(int(header[2]))  # 头: <sha> <type> <size>
-        self.p.stdout.read(1)
+        self._in.write(sha.encode() + b"\n")
+        self._in.flush()
+        header = self._out.readline().split()
+        data = self._out.read(int(header[2]))  # 头: <sha> <type> <size>
+        self._out.read(1)
         return data
 
     def close(self) -> None:
-        self.p.stdin.close()
+        self._in.close()
         self.p.terminate()
 
 
