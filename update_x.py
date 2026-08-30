@@ -1,0 +1,53 @@
+"""用法：uv run update_x.py <上游下载的 zip 路径>
+
+同步上游 X 版的完整流程：
+1. 解压 zip，找到其中所有 epub（支持完整下载或部分挑选两种情况）；
+2. 每个 epub 解压后整体替换 X/ 下的同名文件夹——旧版先整个删除，
+   防止上游文件改名或删除后残留旧文件；
+3. 全部替换完成后重跑 x2y.py 重新生成 Y/。
+"""
+
+import shutil
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+from x2y import x2y
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    zip_path = Path(sys.argv[1])
+    x_dir = Path("X")
+
+    with zipfile.ZipFile(zip_path) as outer:
+        epubs = [n for n in outer.namelist() if n.lower().endswith(".epub")]
+        if not epubs:
+            sys.exit(f"错误：{zip_path} 中没有 epub 文件")
+        print(f"{zip_path.name}：共 {len(epubs)} 个 epub")
+
+        for name in epubs:
+            vol = Path(name).stem
+            target = x_dir / vol
+            # 先解压到临时目录并校验，确认无误后再替换，避免解压失败时旧版已被删除
+            with tempfile.TemporaryDirectory() as tmp:
+                staging = Path(tmp) / "extract"
+                with outer.open(name) as f, zipfile.ZipFile(f) as epub:
+                    epub.extractall(staging)
+                if not (staging / "mimetype").is_file():
+                    sys.exit(f"错误：{name} 不是有效的 epub（缺少 mimetype），已中止")
+                existed = target.exists()
+                if existed:
+                    shutil.rmtree(target)
+                shutil.move(str(staging), target)
+            print(f"{'更新' if existed else '新增'}：{vol}")
+
+    print("重跑 x2y.py …")
+    x2y()
+    print("完成。")
+
+
+if __name__ == "__main__":
+    main()
