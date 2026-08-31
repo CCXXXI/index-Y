@@ -63,7 +63,8 @@ def fixed(vol: str, content: str) -> str:
 
 def x2y():
     x, y = ROOT / "X", ROOT / "Y"
-    shutil.rmtree(y, ignore_errors=True)
+    if y.exists():  # 只豁免「不存在」；占用/只读等删除错误保持响亮失败
+        shutil.rmtree(y)
     for vol in tqdm(list(x.iterdir()), "x2y"):
         shutil.copytree(vol, y / vol.name)
         for file in (y / vol.name).rglob("*"):
