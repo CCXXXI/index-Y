@@ -26,8 +26,8 @@ uv run python scripts/sync/s3_commit_pure_formatting.py
 uv run python scripts/sync/s4_commit_layout.py
 uv run python scripts/sync/s5_triage_text.py                  # 分类 + 导出审查材料
 uv run python scripts/sync/s6a_commit_adopted_x.py            # 规则采纳：提交 X 侧改动
-uv run python scripts/sync/s6b_prune_redundant_rules.py --commit  # 删除已冗余规则
-# --finish 等价于：s5 --commit → s6a → s6b --commit
+uv run python scripts/sync/s6b_report_inactive_rules.py       # 报告失活规则（不删除）
+# --finish 等价于：s5 --commit → s6a → s6b
 ```
 
 s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在 `%LOCALAPPDATA%\index-Y-triage\`。
@@ -90,7 +90,7 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 | 块分类 | 处理 |
 |---|---|
 | 正常同步候选（`sync`） | 逐条人工/AI 审查改动内容，正常 → 提交（见下） |
-| 规则采纳（`adopted`，规则收敛） | s6a 提交 X 侧、s6b 机械验证并删除冗余规则（见第 7 节） |
+| 规则采纳（`adopted`，规则收敛） | s6a 提交 X 侧、s6b 验证并报告失活规则（见第 7 节） |
 | 规则失效型收敛（`rulekilled`） | s6a 成对提交：旧 X 命中规则、上游改写/消除触发文本后两侧逐字收敛且无规则命中；失效规则进 s6b 候选 |
 | 疑似上游错误（`suspect`）/ 复杂 | 留下 |
 
@@ -123,8 +123,8 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 ## 7. 规则采纳收尾（s6a → s6b，可重跑）
 
-规则采纳的拆分流：X 侧改动与规则清理分成独立提交，中间态不破坏不变式
-（规则在被采纳处变成 no-op，x2y(X) == Y 仍成立）。s6a/s6b 均幂等可重跑，
+规则采纳的拆分流：s6a 只提交 X 侧改动，规则本身不动（被采纳处变成 no-op，
+x2y(X) == Y 仍成立）。s6a/s6b 均幂等可重跑，
 无需等人工审查：s5 分类后即可跑第一轮（处理纯规则采纳块），s5 --commit
 后再跑第二轮收尾——混合块对的正常同步片段此时已入 HEAD，重跑分类后其
 X 侧剩余 diff 自然退化为纯规则采纳块。
@@ -135,13 +135,14 @@ X 侧剩余 diff 自然退化为纯规则采纳块。
   `adopted_rules.json`：与既有候选合并（收敛用到的规则 ∪ 命中改动块
   旧文本的规则 ∪ 规则失效块命中的规则），覆盖「上游采纳」与「上游改写
   源文本为第三种形式」两种失效路径，s6b 消费后剔除。支持 `--dry-run`。
-- **s6b**：逐条机械验证候选规则的冗余性——从管道移除该条后 fixed() 在
-  **HEAD 与工作区**的 X 上输出均不变 → 从 x2y.py 删除（AST 定位，兼容
-  rf 串与多行元组）；否则保留并报告（规则仍在他处生效）。验证 HEAD X
-  强制了顺序：s6a 未先提交时旧 X 仍命中规则，验证自动失败。验证工作区
-  X 是为了覆盖留在工作区的疑似上游错误块。默认只报告，--commit 删除并
-  提交（单个 commit），提交前做全树差分复核（新旧管道输出逐字节一致；
-  不直接比 Y，HEAD 可能存在与本次删除无关的分流中途不对称）。
+- **s6b**：逐条机械验证候选规则是否失活——从管道移除该条后 fixed() 在
+  **HEAD 与工作区**的 X 上输出均不变 → 当前失活，报告；否则报告首个
+  反例（规则仍在他处生效）。失活规则保留在 rules/ 中不删除：X 持续增长，
+  错误类规则可能在新内容复发，删除会把未来的漏校正变成人工审查成本，
+  而保留的扫描开销可忽略（每条规则全语料约十几毫秒）。验证 HEAD X
+  强制了顺序：s6a 未先提交时旧 X 仍命中规则，验证自动失败（报「仍生效」）。
+  验证工作区 X 是为了覆盖留在工作区的疑似上游错误块。已验证失活与已
+  不在 rules/ 中的候选从 `adopted_rules.json` 剔除，仍生效的保留待下轮。
 
 ## 8. 每批提交后的收尾
 
