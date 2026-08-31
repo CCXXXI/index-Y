@@ -79,7 +79,7 @@ def main() -> None:
             committed += 1
             continue
         body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-        subject = f"fix: sync X/{rel}（上游采纳规则，{len(got)} 处）"
+        subject = f"fix: sync X/{rel}（{len(got)} 处文本修订，Y 侧规则渲染）"
         with open(xp, "rb") as f:
             saved = f.read()
         try:
