@@ -24,6 +24,7 @@ def run(script: str, *args: str) -> None:
 
 def main() -> None:
     if "--finish" in sys.argv:
+        run("check_y_freshness.py")  # 批发提交的不变式前提：Y == x2y(X)
         run("s5_triage_text.py", "--commit")
         run("s6a_commit_adopted_x.py")
         run("s6b_report_inactive_rules.py")

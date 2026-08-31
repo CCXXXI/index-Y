@@ -1,36 +1,33 @@
-"""批次 5：文本改动按【改动块】分流（正常同步提交，疑似上游错误/规则采纳留下）。
+"""批次 5：文本改动按【改动块】分类导出审查材料；--commit 批发提交。
+
+分流模型（X = 上游逐字镜像，Y = x2y(X) 净化产物）：
+- 审查在 rules/ 中落地：确认的上游错误写校正规则，存疑/无法修正的写
+  回钉规则（新文本→旧文本），重跑 x2y.py 后 Y 即净化。
+- --commit 无块级拆分：check_y_freshness 保证 Y == x2y(X)，收敛的文件
+  整文件成对批发提交，X 侧完整接收上游原文（含已写规则的缺陷文本）。
+- 存在未收敛块（suspect）或复杂文件时 --commit 中止，必须先写规则。
 
 分类（按相对路径配对 X/<rel> 与 Y/<rel>）：
 1. 两侧各自提取相对 HEAD 的文本改动（文本块级 difflib，仅接受 1:1 replace）。
 2. 旧 X 与旧 Y 的文本块序列做【位置对齐】（1:1，允许旧 Y 被规则改写），
-   把两侧改动配成「同位置块对」。位置对齐失败 → 复杂，整文件留下。
-   含块增删/N→M 替换的结构改动文件走 structural_pairs 块组级配对：
-   以「映射后旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组并做内容
-   收敛验证；全部块对为 sync/rulekilled 时整文件成对提交（无法按块拆分），
-   否则整文件留审。
+   把两侧改动配成「同位置块对」。位置对齐失败 → 复杂。
+   含块增删/N→M 替换的结构改动文件走 structural_pairs 块组级配对收敛验证。
 3. 逐块对分类（F() = 块内最小差异片段集）：
    - 两侧都有改动且 F(x) == F(y)          → 正常同步候选对（"sync"）
    - 两侧都有改动且 F(x) ⊃ F(y)，X 多出的片段能被 x2y 规则解释（收敛）
-                                           → 混合块对（"mixed"）：Y 块整块提交；
-                                             X 侧片段级拆分，正常同步片段提交、
-                                             规则采纳片段留下（两侧提交保持对称，
-                                             HEAD 上 x2y(X) == Y 不变式不被破坏）
+                                          → 规则收敛块对（"mixed"）
    - 仅 X 有改动且能收敛（或规则管道等价：apply_rules 后新旧 X 文本一致，
      即上游改动整个落在规则覆盖内、fixed 后 Y 不变——覆盖多步推导这类
-     片段级收敛看不见的情形）       → 规则采纳（"adopted"，留 s6a）
-   - 其余（Y 有多余片段 / 仅 Y 有改动 / 不收敛）→ 疑似上游错误（"suspect"，留下）
+     片段级收敛看不见的情形）       → 规则采纳（"adopted"）
+   - 其余（Y 有多余片段 / 仅 Y 有改动 / 不收敛）→ 疑似上游错误（"suspect"）
    片段级比较是必要的：旧 Y 的同一句子可能已被 x2y 规则改过，
    块字面不同不代表改动不同；但只做全局片段集比较会把「同碎片的另一处
    规则采纳改动」误判为正常同步，所以必须先按位置配对。
 
-提交粒度为块而非文件：用 apply_blocks 构造「只应用正常同步块」的中间版本提交，
-规则采纳/疑似块与被排除块留在工作区。排除（triage_exclude.json）按块对生效：
-任一侧块命中排除则整对留下。每文件一个 commit（X/Y 成对）。
-
 运行两次：
 1) 默认模式：分类并导出审查材料（STATE_DIR/review_changes.txt = 正常同步候选块、
    suspect_changes.txt = 疑似上游错误块、plan.json = 逐文件块对明细）。
-2) --commit：提交未被排除的正常同步块。
+2) --commit：门控通过后批发提交全部改动，工作区清零；否则中止。
 用法: uv run python scripts/sync/s5_triage_text.py [--commit]
 """
 
@@ -48,15 +45,11 @@ from lib_triage import (
     TEXT_EXT,
     CatFile,
     aligned_chunks,
-    apply_blocks,
-    apply_frags,
-    chunk_changes,
     commit_paths,
     frag_set,
     git,
     head_sha_map,
     norm_ws,
-    raw_variants,
     text_chunks,
 )
 from s1_commit_image_renames import STATE_DIR
@@ -242,43 +235,6 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
                           ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2]))))
             gate = False
     return pairs, gate, used_rules, fired_rules
-
-
-def revert_block_positional(text: str, head_bytes: bytes,
-                            o: str, n: str) -> str | None:
-    """按块序定位还原：在 HEAD→text 的 1:1 replace 中找到 norm 级匹配 (o,n)
-    的唯一块，按其在新文本块序列中的位置顺序扫描定位 raw 形态并替换回 o。
-
-    用于文本过短（如「。」」）无法按字符串唯一性定位的排除块。
-    匹配不唯一或定位失败返回 None。
-    """
-    oc, nc = text_chunks(head_bytes), text_chunks(text.encode("utf-8"))
-    on, nn = [norm_ws(c) for c in oc], [norm_ws(c) for c in nc]
-    sm = difflib.SequenceMatcher(a=on, b=nn, autojunk=False)
-    targets = []
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag != "replace" or (i2 - i1) != (j2 - j1):
-            continue
-        for oi, nj in zip(range(i1, i2), range(j1, j2)):
-            if on[oi] == o and nn[nj] == n:
-                targets.append(nj)
-    if len(targets) != 1:
-        return None
-    nj = targets[0]
-    pos = 0
-    for idx, chunk in enumerate(nc):
-        cands = [(text.find(v, pos), k)
-                 for k, v in enumerate(raw_variants(chunk))
-                 if v and text.find(v, pos) >= 0]
-        if not cands:
-            return None
-        p, k = min(cands)
-        v = raw_variants(chunk)[k]
-        if idx == nj:
-            ovs = raw_variants(o)
-            return text[:p] + ovs[min(k, len(ovs) - 1)] + text[p + len(v):]
-        pos = p + len(v)
-    return None
 
 
 def xonly_kind(vol: str, xo: str, xn: str, used: list) -> str:
@@ -469,16 +425,15 @@ def main() -> None:
     n_susp = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "suspect")
     print(f"{len(pairs_by_rel):5d}  有文本改动的文件对")
     print(f"{n_sync:5d}  正常同步候选块对（待人工审查）")
-    print(f"{n_mixed:5d}  混合块对（片段级拆分：正常同步片段两侧提交）")
-    print(f"{n_adopted + n_mixed:5d}  规则采纳块（上游采纳既有规则，留 s6a）")
-    print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，留 s6a）")
-    print(f"{n_susp:5d}  疑似上游错误块对（留下）")
-    print(f"{len(complex_rels):5d}  复杂（对齐失败，留下）")
+    print(f"{n_mixed:5d}  规则收敛块对（差异可被 x2y 规则解释，批发提交）")
+    print(f"{n_adopted + n_mixed:5d}  规则采纳/渲染差异块（随对批发提交）")
+    print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，随对批发提交）")
+    print(f"{n_susp:5d}  疑似上游错误块对（--commit 将中止，须先写规则）")
+    print(f"{len(complex_rels):5d}  复杂（对齐失败，--commit 将中止）")
     if structural_ok:
-        print(f"{len(structural_ok):5d}  结构改动文件（块组已配对收敛，"
-              f"全过审后整文件成对提交）")
+        print(f"{len(structural_ok):5d}  结构改动文件（块组已配对收敛，批发提交）")
     if new_only:
-        print(f"{len(new_only):5d}  新增文件（未处理，人工）")
+        print(f"{len(new_only):5d}  新增文件（批发成对提交）")
 
     # 导出审查材料
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -522,190 +477,65 @@ def main() -> None:
         print(f"疑似上游错误: {os.path.join(STATE_DIR, 'suspect_changes.txt')}")
 
     if not do_commit:
-        print("审查后把可疑改动（整块 old/new）写入 "
-              f"{os.path.join(STATE_DIR, 'triage_exclude.json')}，再带 --commit 运行")
+        print("审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
+              "uv run python scripts/x2y.py，再带 --commit 运行")
         return
 
-    excl_path = os.path.join(STATE_DIR, "triage_exclude.json")
-    excludes = set()
-    if os.path.exists(excl_path):
-        with open(excl_path, encoding="utf-8") as f:
-            excludes = {tuple(x) for x in json.load(f)}
-        print(f"排除规则 {len(excludes)} 条（按块对生效）")
+    # 提交门：任何未收敛/未处理块都中止——先写规则、重跑 x2y 后再来。
+    problems = []
+    if n_susp:
+        problems.append(f"{n_susp} 个疑似块（见 suspect_changes.txt）")
+    if complex_rels:
+        problems.append(f"{len(complex_rels)} 个复杂文件（对齐失败）: "
+                        + "、".join(complex_rels[:5]))
+    if problems:
+        print("中止：存在未处理改动。为对应文本写 x2y 规则（校正或回钉旧文本），"
+              "重跑 uv run python scripts/x2y.py 后重新 --commit：")
+        for p in problems:
+            print("  -", p)
+        raise SystemExit(1)
 
-    fails = 0
-    committed_rels = 0
+    # 批发提交：Y == x2y(X) 由 check_y_freshness 保证（s0 --finish 前置），
+    # 收敛改动无需块级拆分，整文件成对提交；X 侧完整接收上游原文
+    # （含已写规则的缺陷文本），Y 侧为规则净化后的文本。
+    committed = 0
     for rel, ps in pairs_by_rel.items():
-        if rel in structural_ok:
-            # 结构文件：结构组（增删/N→M）无法按块还原，其余按块对提交——
-            # 被排除的 1:1 块在两侧工作区文本上还原回 HEAD 旧文本后提交中间
-            # 版本（与纯 1:1 文件的排除语义一致：错误块留在工作区等上游修复）
-            ex_pairs = [(xb, yb) for _, xb, yb in ps
-                        if (xb and xb in excludes) or (yb and yb in excludes)]
-            if any(xb is None or yb is None
-                   or not xb[0] or not xb[1] or not yb[0] or not yb[1]
-                   or "\n" in xb[0] or "\n" in xb[1]
-                   for xb, yb in ex_pairs):
-                print("  结构文件的结构组命中排除（无法按块还原），整文件留审:", rel)
-                fails += 1
-                continue
-            xp, yp = "X/" + rel, "Y/" + rel
-            vol = rel.split("/")[0]
-            inter, ok = {}, True
-            for p, side in ((xp, 0), (yp, 1)):
-                text = work[p].decode("utf-8")
-                # 同一文本的排除块可能多处出现：出现次数与排除次数相等时
-                # 说明所有出现都是被排除块，可安全地全部还原
-                groups = Counter((xb, yb)[side] for xb, yb in ex_pairs)
-                for (o, n), m in groups.items():
-                    nvs, ovs = raw_variants(n), raw_variants(o)
-                    hit = next((k for k, v in enumerate(nvs)
-                                if v and text.count(v) == m), None)
-                    if hit is not None:
-                        text = text.replace(nvs[hit], ovs[hit])
-                        continue
-                    # 文本过短无法按唯一性定位：按块序定位（排除块在
-                    # HEAD→中间版的 1:1 replace 中须唯一）
-                    r = revert_block_positional(text, head[p], o, n)
-                    if r is None:
-                        ok = False
-                        break
-                    text = r
-                if not ok:
-                    break
-                inter[p] = text
-            if not ok:
-                print("  被排除块定位歧义，整文件留审:", rel)
-                fails += 1
-                continue
-            # 校验 1：还原后两侧块多重集差异恰好是被排除对
-            for p, side in ((xp, 0), (yp, 1)):
-                wc = Counter(norm_ws(c) for c in text_chunks(work[p]))
-                ic = Counter(norm_ws(c)
-                             for c in text_chunks(inter[p].encode("utf-8")))
-                want_o, want_n = Counter(), Counter()
-                for xb, yb in ex_pairs:
-                    b = (xb, yb)[side]
-                    want_o[b[0]] += 1
-                    want_n[b[1]] += 1
-                if ic - wc != want_o or wc - ic != want_n:
-                    ok = False
-            if not ok:
-                print("  中间版本校验失败，整文件留审:", rel)
-                fails += 1
-                continue
-            # 校验 2：不变式（与 check_y_freshness 同语义：换行归一化后
-            # fixed(X) == Y；x2y 写出的 Y 与上游 X 换行风格可能不同）
-            xtxt = inter[xp].replace("\r\n", "\n")
-            ytxt = inter[yp].replace("\r\n", "\n")
-            if fixed(vol, xtxt) != ytxt:
-                print("  fixed(X) != Y，不变式不满足，整文件留审:", rel)
-                fails += 1
-                continue
-            excluded_xbs = {xb for xb, _ in ex_pairs}
-            terms = [t for t in (group_summary(xb[0], xb[1])
-                                 for _, xb, _ in ps
-                                 if xb and xb not in excluded_xbs) if t]
-            n_commit = len(ps) - len(ex_pairs)
-            body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-            paths = [p for p in (xp, yp) if head[p] != work[p]]
-            saved = {}
-            try:
-                for p in paths:
-                    with open(p, "rb") as f:
-                        saved[p] = f.read()
-                    with open(p, "wb") as f:
-                        f.write(inter[p].encode("utf-8"))
-                commit_paths(f"fix: sync {rel}（{n_commit} 处文本修订）",
-                             body, paths)
-                committed_rels += 1
-            except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
-                fails += 1
-                print("  FAIL:", rel, str(ex)[:150])
-            finally:
-                for p, b in saved.items():
-                    with open(p, "wb") as f:
-                        f.write(b)
-            git("add", "-A")
-            continue
-        keepx, keepy, partx, partn = [], [], {}, {}
-        for k, xb, yb in ps:
-            if k not in ("sync", "mixed"):
-                continue
-            if (xb and xb in excludes) or (yb and yb in excludes):
-                continue  # 块对级排除
-            if k == "sync":
-                keepx.append(xb)
-                keepy.append(yb)
-            else:  # 混合块对：Y 整块提交，X 侧片段级拆分只应用正常同步片段
-                fy = block_frags(*yb)
-                keepy.append(yb)
-                partx[xb] = block_frags(*xb) - fy
-                partn[xb] = (xb[0], apply_frags(xb[0], xb[1], fy))
-        if not keepx and not keepy and not partx:
-            continue
         xp, yp = "X/" + rel, "Y/" + rel
-        inter = {}
-        if keepx or partx:
-            s = apply_blocks(head[xp], work[xp], set(keepx), partial=partx)
-            if s is None:
-                print("  定位歧义，整文件留审:", rel)
-                fails += 1
-                continue
-            inter[xp] = s
-        if keepy:
-            s = apply_blocks(head[yp], work[yp], set(keepy))
-            if s is None:
-                print("  定位歧义，整文件留审:", rel)
-                fails += 1
-                continue
-            inter[yp] = s
-        # 校验：中间版本恰好 = keep 块 ∪ 混合块的部分应用（混合块允许
-        # 因片段定位失败退化为整块还原，即不出现）
-        ok, ncx, ncy = True, 0, 0
-        for p, keep, partok, which in (
-                (xp, keepx, set(partn.values()), "x"),
-                (yp, keepy, set(), "y")):
-            if p not in inter:
-                continue
-            got = chunk_changes(head[p], inter[p].encode("utf-8"))
-            if got is None or not set(keep) <= set(got) <= set(keep) | partok:
-                print("  中间版本校验失败，整文件留审:", rel)
-                ok = False
-            elif which == "x":
-                ncx = len(got)
-            else:
-                ncy = len(got)
-        if not ok:
-            fails += 1
+        paths = [p for p in (xp, yp) if head[p] != work[p]]
+        if not paths:
             continue
-        paths = list(inter)
         if rel.lower().endswith((".opf", ".ncx")):
             subject, body = f"chore: sync {rel}", "元数据/时间戳更新"
-        else:
-            terms = [t for t in (term_summary(o, n) for o, n in keepx) if t]
+        elif rel in structural_ok:
+            terms = [t for t in (group_summary(xb[0], xb[1])
+                                 for _, xb, _ in ps if xb) if t]
             body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-            subject = f"fix: sync {rel}（{ncx + ncy} 处文本修订）"
-        saved = {}
-        try:
-            for p in paths:
-                with open(p, "rb") as f:
-                    saved[p] = f.read()
-                with open(p, "wb") as f:
-                    f.write(inter[p].encode("utf-8"))
-            commit_paths(subject, body, paths)
-            committed_rels += 1
-        except Exception as ex:  # noqa: BLE001  提交失败回滚留审，继续处理后续文件
-            fails += 1
-            print("  FAIL:", rel, str(ex)[:150])
-        finally:
-            for p, b in saved.items():
-                with open(p, "wb") as f:
-                    f.write(b)
-        git("add", "-A")
+            subject = f"fix: sync {rel}（{len(ps)} 处文本修订）"
+        else:
+            sel = [xb for k, xb, _ in ps if k in ("sync", "mixed") and xb]
+            terms = [t for t in (term_summary(xb[0], xb[1]) for xb in sel) if t]
+            body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
+            subject = f"fix: sync {rel}（{len(sel)} 处文本修订）"
+        commit_paths(subject, body, paths)
+        committed += 1
+
+    # 新增文件（两侧同现）：fixed(X) == Y 由前置 freshness 保证，直接成对提交
+    for rel in new_only:
+        paths = [f"{side}/{rel}" for side in ("X", "Y")
+                 if os.path.exists(f"{side}/{rel}")]
+        if paths:
+            commit_paths(f"fix: sync {rel}（新增文件）", "", paths)
+            committed += 1
+
     git("add", "-A")
-    left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines() if l]
-    print(f"完成。提交 {committed_rels} 对，失败/留审 {fails}，剩余暂存 {len(left)}")
+    left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines()
+            if l]
+    if left:
+        print("中止：以下改动未被文本对覆盖（二进制/重命名/仅单侧增删等），"
+              "人工审查后按性质提交：")
+        print("\n".join(left[:30]))
+        raise SystemExit(1)
+    print(f"完成。提交 {committed} 对，工作区已清零")
 
 
 if __name__ == "__main__":
