@@ -299,7 +299,7 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
     反复应用「能严格缩小 (o,n) 差异片段集」的规则；收敛后剩余片段都在
     other_frags 中，则该块的 X 独有部分是规则覆盖的（上游采纳了规则）。
     被用到的规则记入 used，元素为 (section, old, new)——section 是 fixes
-    的键（卷名或 "*"），供 s6b 定位并验证删除冗余规则。
+    的键（卷名或 "*"），供 s6b 验证是否失活。
     """
     cur = block_frags(o, n)
     rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]

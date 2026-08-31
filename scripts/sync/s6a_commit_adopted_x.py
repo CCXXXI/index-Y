@@ -38,7 +38,7 @@ def main() -> None:
               "s5 --commit 后再跑本脚本收尾")
 
     # 导出 s6b 候选（累积制）：既有候选 ∪ 收敛用到的规则 ∪ 命中改动块
-    # 旧文本的规则 ∪ 规则失效型收敛块命中的规则。s6b 消费后剔除已删/失效项。
+    # 旧文本的规则 ∪ 规则失效型收敛块命中的规则。s6b 消费后剔除已失活项。
     cand_path = os.path.join(STATE_DIR, "adopted_rules.json")
     os.makedirs(STATE_DIR, exist_ok=True)
     cand = defaultdict(set)
