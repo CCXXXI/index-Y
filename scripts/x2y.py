@@ -72,7 +72,7 @@ def x2y():
                 continue
             with open(file, "r", encoding="utf-8") as f:
                 content = f.read()
-            with open(file, "w", encoding="utf-8") as f:
+            with open(file, "w", encoding="utf-8", newline="") as f:
                 f.write(fixed(vol.name, content))
 
 
