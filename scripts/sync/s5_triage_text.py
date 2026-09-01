@@ -438,13 +438,16 @@ def main() -> None:
     # 导出审查材料
     os.makedirs(STATE_DIR, exist_ok=True)
     agg = Counter()
-    for ps in pairs_by_rel.values():
+    agg_rels = defaultdict(list)
+    for rel, ps in pairs_by_rel.items():
         for k, xb, _ in ps:
             if k in ("sync", "mixed") and xb:
                 agg[xb] += 1
+                agg_rels[xb].append(rel)
     with open(os.path.join(STATE_DIR, "review_changes.txt"), "w",
               encoding="utf-8") as f:
-        f.writelines(f"[{c}次]\n- {o}\n+ {n}\n\n" for (o, n), c in agg.most_common())
+        for (o, n), c in agg.most_common():
+            f.write(f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n")
     with open(os.path.join(STATE_DIR, "suspect_changes.txt"), "w",
               encoding="utf-8") as f:
         for rel, ps in pairs_by_rel.items():
