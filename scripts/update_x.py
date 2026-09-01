@@ -16,6 +16,8 @@ from pathlib import Path
 from tqdm import tqdm
 from x2y import x2y
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 def main() -> None:
     if len(sys.argv) != 2:
@@ -31,8 +33,10 @@ def main() -> None:
         for name in tqdm(epubs, "解压"):
             vol = Path(name).stem
             target = x_dir / vol
-            # 先解压到临时目录并校验，确认无误后再替换，避免解压失败时旧版已被删除
-            with tempfile.TemporaryDirectory() as tmp:
+            # 先解压到仓库内的临时目录（.gitignore 排除）并校验，确认无误后
+            # 再替换；与 X/ 同卷可直接 move，且避免解压失败时旧版已被删除
+            with tempfile.TemporaryDirectory(dir=REPO_ROOT,
+                                             prefix=".update-x-") as tmp:
                 staging = Path(tmp) / "extract"
                 with outer.open(name) as f, zipfile.ZipFile(f) as epub:
                     epub.extractall(staging)

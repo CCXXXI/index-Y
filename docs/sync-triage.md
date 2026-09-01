@@ -31,7 +31,7 @@ uv run python scripts/sync/s6b_report_inactive_rules.py       # 报告失活规�
 # --finish 等价于：check_y_freshness → s5 --commit → s6a → s6b
 ```
 
-s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在 `%LOCALAPPDATA%\index-Y-triage\`。
+s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
 各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：s1 无图片重命名时也会写出空 `rename_map.json`，s2 读到空映射直接跳过。
 

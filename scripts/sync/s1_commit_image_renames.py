@@ -9,9 +9,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import IMG_EXT, git, staged_renames
+from lib_triage import IMG_EXT, git, repo_root, staged_renames
 
-STATE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", "/tmp"), "index-Y-triage")
+# 分流脚本间的共享状态目录（rename 映射、审查材料、s6b 候选规则），已 gitignore
+STATE_DIR = os.path.join(repo_root(), ".triage")
 
 
 def main() -> None:
