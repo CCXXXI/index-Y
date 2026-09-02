@@ -9,6 +9,10 @@
 - `scripts/`：工具脚本（`x2y.py`、`update_x.py`、`tag.py`、`active_rules.py`）；`scripts/sync/` 为同步分流系列（s0~s6b + 共用库）。
 - `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。
 
+## 脚本开发
+
+新增或修改 `scripts/` 后，提交前必须跑通 `uv run ruff check .` 与 `uv run ty check .`（零报告才算通过）。
+
 ## 同步上游的工作流
 
 上游 X 更新后：运行 `uv run python scripts/update_x.py <下载的 zip>`（自动解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`；支持完整下载或部分挑选的 zip），然后把产生的海量改动**分流提交**。
