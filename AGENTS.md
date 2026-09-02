@@ -16,7 +16,7 @@
 
 ## 同步上游的工作流
 
-上游 X 更新后：运行 `uv run python scripts/update_x.py <下载的 zip>`（自动解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`；支持完整下载或部分挑选的 zip），然后把产生的海量改动**分流提交**。
+上游 X 更新后：运行 `uv run python scripts/sync/s0_run_all.py <下载的 zip>`（先自动执行 update_x 入仓——解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`，支持完整下载或部分挑选的 zip；随后自动进入分流。带 zip 要求工作区干净：上轮未收尾会被拒绝，先 `--finish` 收尾，确认放弃在途审查则手动跑 `scripts/update_x.py <zip>` 强行并入），然后把产生的海量改动**分流提交**。
 
 ### 分流三类规则
 

@@ -26,7 +26,7 @@ def main() -> None:
     parser.add_argument("zip", type=Path, help="上游下载的 zip 路径")
     args = parser.parse_args()
     zip_path: Path = args.zip
-    x_dir = Path("X")
+    x_dir = REPO_ROOT / "X"
 
     with zipfile.ZipFile(zip_path) as outer:
         epubs = [n for n in outer.namelist() if n.lower().endswith(".epub")]

@@ -5,7 +5,13 @@
 **全流程已固化为脚本，一键执行（任一步失败即中止；各步幂等可整体重跑）：**
 
 ```bash
-# ===== 全自动（人工审查前） =====
+# ===== 起新轮：上游 zip 入仓（自动跑 update_x）+ 全自动（人工审查前） =====
+uv run python scripts/sync/s0_run_all.py <上游.zip>
+# 带 zip 要求工作区干净：上轮未收尾会被拒绝（在途审查会被新版顶掉）——
+# 先 --finish 收尾；确认放弃在途审查要强行并入（跨轮残留安全，见下）时，
+# 手动 uv run python scripts/update_x.py <zip>
+
+# ===== 在途分流中重跑（不带 zip；人工审查前） =====
 uv run python scripts/sync/s0_run_all.py
 
 # ===== 人工审查 =====
