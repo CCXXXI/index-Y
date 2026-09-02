@@ -10,6 +10,7 @@
 """
 
 import argparse
+import io
 import sys
 from pathlib import Path
 
@@ -21,7 +22,8 @@ RULES_DIR = ROOT / "rules"
 X_DIR = ROOT / "X"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 def load_rules() -> list[dict]:

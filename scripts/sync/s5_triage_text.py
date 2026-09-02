@@ -472,8 +472,7 @@ def main() -> None:
                 agg_rels[xb].append(rel)
     with open(os.path.join(STATE_DIR, "review_changes.txt"), "w",
               encoding="utf-8") as f:
-        for (o, n), c in agg.most_common():
-            f.write(f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n")
+        f.writelines(f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n" for (o, n), c in agg.most_common())
     with open(os.path.join(STATE_DIR, "suspect_changes.txt"), "w",
               encoding="utf-8") as f:
         for rel, ps in pairs_by_rel.items():
