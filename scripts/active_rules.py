@@ -18,49 +18,15 @@ import colorama
 import regex as re
 from colorama import Fore, Style
 from tqdm import tqdm
+from x2y import load_rule_records
 
 ROOT = Path(__file__).parent.parent
-RULES_DIR = ROOT / "rules"
 X_DIR = ROOT / "X"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
 if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 colorama.init()  # 包装 stdout/stderr；非 TTY（重定向到文件/管道）时自动剥离颜色码
-
-
-def load_rules() -> list[dict]:
-    """解析 rules/*.tsv 为规则记录（含出处行号）；校验口径同 x2y.load_rules。"""
-    x_vols = {p.name for p in X_DIR.iterdir() if p.is_dir()}
-    rules = []
-    errors = []
-    for tsv in sorted(RULES_DIR.glob("*.tsv")):
-        section = "*" if tsv.stem == "_common" else tsv.stem
-        if section != "*" and section not in x_vols:
-            errors.append(f"{tsv.name}: 文件名与 X/ 下卷目录不对应")
-        seen = {}
-        for lineno, raw in enumerate(
-                tsv.read_text(encoding="utf-8-sig").splitlines(), 1):
-            if not raw or raw.startswith("#"):
-                continue
-            fields = raw.split("\t")
-            if len(fields) != 2:
-                errors.append(f"{tsv.name}:{lineno}: 字段数 {len(fields)} ≠ 2")
-                continue
-            old, new = fields
-            if old in seen:
-                errors.append(f"{tsv.name}:{lineno}: old 与第 {seen[old]} 行重复")
-            seen[old] = lineno
-            try:
-                re.compile(old)
-            except re.error as e:
-                errors.append(f"{tsv.name}:{lineno}: 正则编译失败: {e}")
-                continue
-            rules.append({"section": section, "lineno": lineno,
-                          "old": old, "new": new})
-    if errors:
-        sys.exit("rules/ 校验失败：\n" + "\n".join(errors))
-    return rules
 
 
 def pick_volume(arg: str) -> str:
@@ -141,7 +107,7 @@ def main() -> int:
     args = parser.parse_args()
     vol = pick_volume(args.volume)
     files = pick_files(vol, args.chapter)
-    rules = load_rules()
+    rules = load_rule_records()
     seq = ([r for r in rules if r["section"] == vol]
            + [r for r in rules if r["section"] == "*"])
     active = scan(vol, files, seq)

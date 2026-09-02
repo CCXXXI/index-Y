@@ -18,10 +18,10 @@ RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
 
-def load_rules() -> dict[str, list[tuple[str, str]]]:
-    """加载 rules/*.tsv 并校验；任何异常直接报错退出（fail-loud）。"""
+def load_rule_records() -> list[dict]:
+    """加载 rules/*.tsv 为规则记录（含出处行号）并校验；异常直接报错退出。"""
     x_vols = {p.name for p in (ROOT / "X").iterdir() if p.is_dir()}
-    fixes: dict[str, list[tuple[str, str]]] = {}
+    records = []
     errors = []
     for tsv in sorted(RULES_DIR.glob("*.tsv")):
         section = "*" if tsv.stem == "_common" else tsv.stem
@@ -47,9 +47,18 @@ def load_rules() -> dict[str, list[tuple[str, str]]]:
                 re.compile(old)
             except re.error as e:
                 errors.append(f"{tsv.name}:{lineno}: 正则编译失败: {e}")
-            fixes.setdefault(section, []).append((old, new))
+            records.append({"section": section, "lineno": lineno,
+                            "old": old, "new": new})
     if errors:
         sys.exit("rules/ 校验失败：\n" + "\n".join(errors))
+    return records
+
+
+def load_rules() -> dict[str, list[tuple[str, str]]]:
+    """把规则记录按段聚合为应用管道。"""
+    fixes: dict[str, list[tuple[str, str]]] = {}
+    for r in load_rule_records():
+        fixes.setdefault(r["section"], []).append((r["old"], r["new"]))
     return fixes
 
 
