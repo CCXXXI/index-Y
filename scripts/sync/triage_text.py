@@ -1,4 +1,4 @@
-"""批次 5：文本改动按【改动块】分类导出审查材料；--commit 批发提交。
+"""文本改动按【改动块】分类导出审查材料；--commit 批发提交。
 
 分流模型（X = 上游逐字镜像，Y = x2y(X) 净化产物）：
 - 审查在 rules/ 中落地：确认的上游错误写校正规则，存疑/无法修正的写
@@ -28,7 +28,7 @@
 1) 默认模式：分类并导出审查材料（STATE_DIR/review_changes.txt = 正常同步候选块、
    suspect_changes.txt = 疑似上游错误块、plan.json = 逐文件块对明细）。
 2) --commit：门控通过后批发提交全部改动，工作区清零；否则中止。
-用法: uv run python scripts/sync/s5_triage_text.py [--commit]
+用法: uv run python scripts/sync/triage_text.py [--commit]
 """
 
 import difflib
@@ -41,6 +41,7 @@ from collections import Counter, defaultdict
 import regex as re  # 规则含 \p{}，stdlib re 不支持
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from commit_image_renames import STATE_DIR
 from lib_triage import (
     CatFile,
     aligned_chunks,
@@ -53,7 +54,6 @@ from lib_triage import (
     text_chunks,
     triage_parser,
 )
-from s1_commit_image_renames import STATE_DIR
 from x2y import fixed, fixes
 
 # .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
@@ -270,7 +270,7 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
     反复应用「能严格缩小 (o,n) 差异片段集」的规则；收敛后剩余片段都在
     other_frags 中，则该块的 X 独有部分是规则覆盖的（上游采纳了规则）。
     被用到的规则记入 used，元素为 (section, old, new)——section 是 fixes
-    的键（卷名或 "*"），供 s6b 验证是否失活。
+    的键（卷名或 "*"），供 report_inactive_rules 验证是否失活。
     """
     cur = block_frags(o, n)
     rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
@@ -290,13 +290,13 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
 
 
 def classify() -> dict:
-    """对当前工作区改动做逐文件块对分类（s5/s6a/s6b 共用）。
+    """对当前工作区改动做逐文件块对分类（triage_text/commit_adopted_x/report_inactive_rules 共用）。
 
     返回 {pairs_by_rel, complex, new_files, rule_use, touched_rules, head, work}：
     - pairs_by_rel[rel] = [(kind, xblock_or_None, yblock_or_None)]，
       kind: "sync" / "mixed" / "adopted" / "rulekilled" / "suspect"
     - rule_use: {(section, ro, rn): {rel, ...}}，收敛判定用到的规则
-    - touched_rules: 同构，能命中改动块旧 X 文本的全部规则（s6b 候选超集）
+    - touched_rules: 同构，能命中改动块旧 X 文本的全部规则（report_inactive_rules 候选超集）
     - rulekilled_rules: 同构，规则失效型收敛块旧文本命中的规则
     - head/work: 路径 -> bytes（单侧无改动的另一侧以 HEAD 内容充当）
     """
@@ -361,7 +361,7 @@ def classify() -> dict:
             continue
         vol = rel.split("/")[0]
         # 规则触点：规则若能命中改动块的【旧】X 文本，上游改动可能使其失效
-        # （收敛采纳 / 改写为第三种形式都算）——全部记为 s6b 候选，验证把关
+        # （收敛采纳 / 改写为第三种形式都算）——全部记为 report_inactive_rules 候选，验证把关
         rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
                  + [("*", ro, rn) for ro, rn in fixes["*"]])
         if structural:
@@ -512,7 +512,7 @@ def main() -> None:
             print("  -", p)
         raise SystemExit(1)
 
-    # 批发提交：Y == x2y(X) 由 check_y_freshness 保证（s0 --finish 前置），
+    # 批发提交：Y == x2y(X) 由 check_y_freshness 保证（run_all.py --finish 前置），
     # 收敛改动无需块级拆分，整文件成对提交；X 侧完整接收上游原文
     # （含已写规则的缺陷文本），Y 侧为规则净化后的文本。
     committed = 0
@@ -553,7 +553,7 @@ def main() -> None:
         print("\n".join(left[:30]))
         raise SystemExit(1)
     print(f"完成。提交 {committed} 对，工作区已清零")
-    # 轮次结束：rename 映射只服务于轮内 s1→s2，删除以防跨轮累积
+    # 轮次结束：rename 映射只服务于轮内 commit_image_renames → commit_image_refs，删除以防跨轮累积
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if os.path.exists(map_path):
         os.remove(map_path)

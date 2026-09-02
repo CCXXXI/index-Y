@@ -1,10 +1,10 @@
-"""批次 3：纯格式化变更 → 单个 commit。
+"""纯格式化变更 → 单个 commit。
 
 判定（HTML 解析对比 HEAD 与新版，全部满足才算）：
 - 文本内容（空白归一化）完全一致
 - 标签属性多重集合一致
 - 事件序列一致，仅允许「无属性 <p> 包裹 <img>」的增减
-用法: uv run python scripts/sync/s3_commit_pure_formatting.py [--dry-run]
+用法: uv run python scripts/sync/commit_pure_formatting.py [--dry-run]
 """
 
 import os

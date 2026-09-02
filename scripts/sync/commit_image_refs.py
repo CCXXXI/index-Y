@@ -1,8 +1,9 @@
-"""批次 2：图片引用更新 → 单个 commit。
+"""图片引用更新 → 单个 commit。
 
-读取批次 1 写出的 rename 映射，对每个修改的文本文件生成「HEAD + 仅图片名替换」
-的中间版本写入索引。校验：暂存 diff 的每个删除行都含旧图名、新增行不含旧名。
-用法: uv run python scripts/sync/s2_commit_image_refs.py [--dry-run]
+读取 commit_image_renames 写出的 rename 映射，对每个修改的文本文件生成
+「HEAD + 仅图片名替换」的中间版本写入索引。
+校验：暂存 diff 的每个删除行都含旧图名、新增行不含旧名。
+用法: uv run python scripts/sync/commit_image_refs.py [--dry-run]
 """
 
 import json
@@ -11,6 +12,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from commit_image_renames import STATE_DIR
 from lib_triage import (
     CatFile,
     git,
@@ -19,7 +21,6 @@ from lib_triage import (
     stage_content,
     triage_parser,
 )
-from s1_commit_image_renames import STATE_DIR
 
 
 def main() -> None:
@@ -29,7 +30,7 @@ def main() -> None:
     dry = parser.parse_args().dry_run
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if not os.path.exists(map_path):
-        raise SystemExit(f"缺少 {map_path}，请先运行 s1_commit_image_renames.py")
+        raise SystemExit(f"缺少 {map_path}，请先运行 commit_image_renames.py")
     with open(map_path, encoding="utf-8") as f:
         renames: dict[str, str] = json.load(f)
     print(f"映射 {len(renames)} 条")

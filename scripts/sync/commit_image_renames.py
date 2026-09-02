@@ -1,7 +1,8 @@
-"""批次 1：图片重命名 → 单个 commit。
+"""图片重命名 → 单个 commit。
 
-把暂存的 rename 中的图片项单独提交；rename 映射写入共享状态目录供批次 2 使用。
-用法: uv run python scripts/sync/s1_commit_image_renames.py [--dry-run]
+把暂存的 rename 中的图片项单独提交；rename 映射写入共享状态目录供
+commit_image_refs 使用。
+用法: uv run python scripts/sync/commit_image_renames.py [--dry-run]
 """
 
 import json
@@ -11,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import IMG_EXT, git, repo_root, staged_renames, triage_parser
 
-# 分流脚本间的共享状态目录（rename 映射、审查材料、s6b 候选规则），已 gitignore
+# 分流脚本间的共享状态目录（rename 映射、审查材料、失活规则候选），已 gitignore
 STATE_DIR = os.path.join(repo_root(), ".triage")
 
 
@@ -29,7 +30,7 @@ def main() -> None:
         print(f"  跳过: {f} -> {t}")
 
     # basename -> basename（含书号前缀，全局唯一）；无图片重命名时也写空映射，
-    # 供批次 2 判断「本批无引用要更新」
+    # 供 commit_image_refs 判断「本批无引用要更新」
     os.makedirs(STATE_DIR, exist_ok=True)
     m = {os.path.basename(f): os.path.basename(t) for f, t in img}
     # 与已有映射合并（X/Y 两树的 rename 可能分属不同批次）

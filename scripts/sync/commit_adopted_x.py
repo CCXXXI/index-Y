@@ -1,7 +1,7 @@
-"""批次 6a：提交规则相关的自动分流块（规则采纳 + 规则失效型收敛）。
+"""提交规则相关的自动分流块（规则采纳 + 规则失效型收敛）。
 
-无需等人工审查，s5 分类后即可运行；s5 --commit 之后应再跑一遍收尾——
-此时混合块对的正常同步片段已入 HEAD，重跑分类后其 X 侧剩余 diff 退化为
+无需等人工审查，triage_text 分类后即可运行；triage_text --commit 之后应再跑
+一遍收尾——此时混合块对的正常同步片段已入 HEAD，重跑分类后其 X 侧剩余 diff 退化为
 纯规则采纳块。处理两种 kind：
 - "adopted"：仅 X 有改动的规则采纳块，按块提交 X 侧；
 - "rulekilled"：旧 X 命中规则、上游改写后两侧逐字收敛的块对，成对提交。
@@ -9,9 +9,9 @@
 疑似上游错误块自动留在工作区。
 
 收敛判定（convergent）与 rulekilled 的三重条件保证提交后 HEAD 上
-x2y(X) == Y 不变式不被破坏。s6b 候选规则导出为累积制的
-STATE_DIR/adopted_rules.json（与既有候选合并，s6b 消费后剔除）。
-用法: uv run python scripts/sync/s6a_commit_adopted_x.py [--dry-run]
+x2y(X) == Y 不变式不被破坏。失活规则候选导出为累积制的
+STATE_DIR/adopted_rules.json（与既有候选合并，report_inactive_rules 消费后剔除）。
+用法: uv run python scripts/sync/commit_adopted_x.py [--dry-run]
 """
 
 import json
@@ -20,7 +20,7 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from commit_image_renames import STATE_DIR
 from lib_triage import (
     CatFile,
     apply_blocks,
@@ -30,8 +30,7 @@ from lib_triage import (
     head_sha_map,
     triage_parser,
 )
-from s1_commit_image_renames import STATE_DIR
-from s5_triage_text import classify, term_summary
+from triage_text import classify, term_summary
 
 
 def main() -> None:
@@ -46,10 +45,10 @@ def main() -> None:
     if any(k in ("sync", "mixed")
            for ps in pairs_by_rel.values() for k, _, _ in ps):
         print("提示: 存在正常同步候选/混合块，混合块的规则采纳片段需等 "
-              "s5 --commit 后再跑本脚本收尾")
+              "triage_text --commit 后再跑本脚本收尾")
 
-    # 导出 s6b 候选（累积制）：既有候选 ∪ 收敛用到的规则 ∪ 命中改动块
-    # 旧文本的规则 ∪ 规则失效型收敛块命中的规则。s6b 消费后剔除已失活项。
+    # 导出失活规则候选（累积制）：既有候选 ∪ 收敛用到的规则 ∪ 命中改动块
+    # 旧文本的规则 ∪ 规则失效型收敛块命中的规则。report_inactive_rules 消费后剔除已失活项。
     cand_path = os.path.join(STATE_DIR, "adopted_rules.json")
     os.makedirs(STATE_DIR, exist_ok=True)
     cand = defaultdict(set)
@@ -68,7 +67,7 @@ def main() -> None:
     fails = committed = rk_committed = 0
     for rel, ps in pairs_by_rel.items():
         if rel in structural_ok:
-            continue  # 结构文件由 s5 --commit 整文件成对提交
+            continue  # 结构文件由 triage_text --commit 整文件成对提交
         keep = {tuple(xb) for k, xb, _ in ps if k == "adopted" and xb}
         if not keep:
             continue
@@ -118,7 +117,7 @@ def main() -> None:
     # 规则失效型收敛块对：成对提交（X/Y 同块，新文本两侧逐字一致）
     for rel, ps in pairs_by_rel.items():
         if rel in structural_ok:
-            continue  # 结构文件由 s5 --commit 整文件成对提交
+            continue  # 结构文件由 triage_text --commit 整文件成对提交
         rk = [(tuple(xb), tuple(yb))
               for k, xb, yb in ps if k == "rulekilled" and xb and yb]
         if not rk:
@@ -167,7 +166,7 @@ def main() -> None:
     git("add", "-A")
     print(f"完成。提交 {committed} 个 X 文件（规则采纳）、"
           f"{rk_committed} 对（规则失效收敛），失败/留审 {fails}，"
-          f"规则候选 {len(adopted_rules)} 条（→ s6b）")
+          f"规则候选 {len(adopted_rules)} 条（→ report_inactive_rules）")
 
 
 if __name__ == "__main__":

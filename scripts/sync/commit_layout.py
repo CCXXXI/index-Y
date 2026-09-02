@@ -1,8 +1,8 @@
-"""批次 4：版式调整 → 单个 commit。
+"""版式调整 → 单个 commit。
 
 对每个混合文件生成「新结构 + 旧文本」的中间版本（revert_text_chunks），
 验证与 HEAD 文本块完全一致后入提交。纯文本改动的文件不受影响（留审）。
-用法: uv run python scripts/sync/s4_commit_layout.py [--dry-run]
+用法: uv run python scripts/sync/commit_layout.py [--dry-run]
 """
 
 import os

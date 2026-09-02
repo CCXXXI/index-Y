@@ -1,9 +1,9 @@
 """报告指定范围内当前生效的 x2y 规则及其首次生效点。
 
-失活规则保留在 rules/ 中不删除（见 s6b），因此 rules/ 不再等同于
+失活规则保留在 rules/ 中不删除（见 report_inactive_rules），因此 rules/ 不再等同于
 「当前生效的规则清单」；向上游反馈某卷/某章的修订时用本脚本实测。
 
-「生效」定义与 s6b_report_inactive_rules.py 一致：把该规则从管道
+「生效」定义与 report_inactive_rules.py 一致：把该规则从管道
 （分卷段先于通用段，段内自上而下）中移除后，范围内某文本文件的最终
 输出发生改变；仅命中但被后续规则再收敛的不算生效。扫描对象为工作区 X
 中的 .xhtml/.opf/.ncx（与 x2y.py 的 TEXT_EXT 一致）。

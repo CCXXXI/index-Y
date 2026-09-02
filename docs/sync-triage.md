@@ -6,42 +6,42 @@
 
 ```bash
 # ===== 起新轮：上游 zip 入仓（自动跑 update_x）+ 全自动（人工审查前） =====
-uv run python scripts/sync/s0_run_all.py <上游.zip>
+uv run python scripts/sync/run_all.py <上游.zip>
 # 带 zip 要求工作区干净：上轮未收尾会被拒绝（在途审查会被新版顶掉）——
 # 先 --finish 收尾；确认放弃在途审查要强行并入（跨轮残留安全，见下）时，
 # 手动 uv run python scripts/sync/update_x.py <zip>
 
 # ===== 在途分流中重跑（不带 zip；人工审查前） =====
-uv run python scripts/sync/s0_run_all.py
+uv run python scripts/sync/run_all.py
 
 # ===== 人工审查 =====
 # 审查 review_changes.txt / suspect_changes.txt，
 # 为可疑改动写 x2y 规则（校正或回钉，见第 6 节），重跑 uv run python scripts/sync/x2y.py
 
 # ===== 审查后收尾（自动，工作区清零） =====
-uv run python scripts/sync/s0_run_all.py --finish
+uv run python scripts/sync/run_all.py --finish
 # 结束后 X 与上游逐字一致、Y == x2y(X)，无任何改动残留在工作区
 ```
 
-`s0_run_all.py` 依次调用的单步脚本（调试/单步重跑/`--dry-run` 时用）：
+`run_all.py` 依次调用的单步脚本（调试/单步重跑/`--dry-run` 时用）：
 
 ```bash
 uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X)
-uv run python scripts/sync/s1_commit_image_renames.py
-uv run python scripts/sync/s2_commit_image_refs.py
-uv run python scripts/sync/s3_commit_pure_formatting.py
-uv run python scripts/sync/s4_commit_layout.py
-uv run python scripts/sync/s5_triage_text.py                  # 分类 + 导出审查材料；--commit 门控 + 批发提交
-uv run python scripts/sync/s6a_commit_adopted_x.py            # 导出 s6b 规则候选（批发模型下通常无提交）
-uv run python scripts/sync/s6b_report_inactive_rules.py       # 报告失活规则（不删除）
-# --finish 等价于：check_y_freshness → s5 --commit → s6a → s6b
+uv run python scripts/sync/commit_image_renames.py
+uv run python scripts/sync/commit_image_refs.py
+uv run python scripts/sync/commit_pure_formatting.py
+uv run python scripts/sync/commit_layout.py
+uv run python scripts/sync/triage_text.py            # 分类 + 导出审查材料；--commit 门控 + 批发提交
+uv run python scripts/sync/commit_adopted_x.py       # 导出失活规则候选（批发模型下通常无提交）
+uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不删除）
+# --finish 等价于：check_y_freshness → triage_text --commit → commit_adopted_x → report_inactive_rules
 ```
 
-s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
+图片重命名/引用/纯格式化/版式四个批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
-`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：s5 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 s6b 对当前 HEAD 与工作区机械复验后剔除。两个防护：s5 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；s5 `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 s1→s2）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
+`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
 
-各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：s1 无图片重命名时也会写出空 `rename_map.json`，s2 读到空映射直接跳过。
+各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：commit_image_renames 无图片重命名时也会写出空 `rename_map.json`，commit_image_refs 读到空映射直接跳过。
 
 ## 0. 前置校验：Y 必须与当前 X 同步
 
@@ -51,7 +51,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 - 根因：x2y.py 的输出 = `copytree(X)` + fixes，X 若在跑完后又更新，Y 即滞后。
 - 验证：用 `regex` 模块（规则含 `\p{}`，stdlib `re` 不支持）复算 `fixed(vol, X内容)` 与 Y 文件对比。
 - 处理：`uv run python scripts/sync/x2y.py` 重跑后重新走全流程。之前的提交无需重做——各批次的校验逻辑（机械变换逐行验证、改动集完全相等才准入）保证滞后只会造成漏收、不会造成错收。
-- 注意：重跑后 Y 树会涌现整批机械改动（图片重命名、格式 wave），按批次 1-4 同样处理即可。
+- 注意：重跑后 Y 树会涌现整批机械改动（图片重命名、格式 wave），按图片/格式化/版式批次同样处理即可。
 
 ## 0.5 分流中途修改规则（含捞回历史规则）
 
@@ -61,7 +61,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 2. 改 `rules/`，重跑 `uv run python scripts/sync/x2y.py`；
 3. 验证 Y 侧 diff 的每个 hunk 都是规则效果，把规则与 Y 侧改动作为单个 commit 提交——这一步让新 HEAD 上 fixed(X) == Y 重新成立；
 4. `git stash pop`（同一文件内规则效果与在途改动不重叠时自动合并）；
-5. `check_y_freshness` 通过后方可继续分流；若 review 材料已生成，重跑 s5 重新导出（幂等）。
+5. `check_y_freshness` 通过后方可继续分流；若 review 材料已生成，重跑 triage_text 重新导出（幂等）。
 
 ## 1. 通用 git 操作坑（本仓库路径含中文与方括号）
 
@@ -115,16 +115,16 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 | 规则收敛（`mixed`）/ 规则采纳（`adopted`）/ 规则失效型收敛（`rulekilled`） | 两侧差异纯属规则渲染，随对批发提交 |
 | 疑似上游错误（`suspect`）/ 复杂 | `--commit` 中止：先写规则（见下） |
 
-**提交粒度为文件（批发提交）**：X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是 `x2y(X)` 净化产物；`check_y_freshness`（s0 `--finish` 前置）保证不变式逐文件成立，因此收敛文件整文件成对提交。每文件一个 commit（X/Y 成对），提交信息 `fix: sync <相对路径>（N 处文本修订）` 的 N 计 sync+mixed 块。存在 suspect/复杂块或未覆盖改动（二进制、rename 等）时 `--commit` 中止并列出，全部处理完后重跑——**分流结束的必要条件之一是工作区清零**。
+**提交粒度为文件（批发提交）**：X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是 `x2y(X)` 净化产物；`check_y_freshness`（run_all.py `--finish` 前置）保证不变式逐文件成立，因此收敛文件整文件成对提交。每文件一个 commit（X/Y 成对），提交信息 `fix: sync <相对路径>（N 处文本修订）` 的 N 计 sync+mixed 块。存在 suspect/复杂块或未覆盖改动（二进制、rename 等）时 `--commit` 中止并列出，全部处理完后重跑——**分流结束的必要条件之一是工作区清零**。
 
 ### 上游错误的规则化
 
 可疑块写成 x2y 规则（分卷 TSV），重跑 `x2y.py` 后 Y 即净化、块转为规则渲染差异随批发提交：
 
 - **校正规则**（缺陷文本 → 修正文本）：确认是上游错误且能给出修正时使用；有原文对照的规则在 TSV 中以规则上方的 `#` 注释附原文引文与理由（x2y 跳过 `#` 行）。
-- **回钉规则**（新文本 → 旧文本）：存疑或无法给出修正时使用，把该句钉在旧译文上，Y 不含未确认文本。上游日后再改这句时规则失配失活（s6b 报告），该句以新形态重新进入审查。
+- **回钉规则**（新文本 → 旧文本）：存疑或无法给出修正时使用，把该句钉在旧译文上，Y 不含未确认文本。上游日后再改这句时规则失配失活（report_inactive_rules 报告），该句以新形态重新进入审查。
 - 规则键要求：
-  - 优先纯文本键：s5 的收敛判定在纯文本块上进行，含标签的键对收敛不可见，对应块会留在 suspect 里使 `--commit` 中止（此时人工确认 `check_y_freshness` 通过后按对人工提交，message 注明）。
+  - 优先纯文本键：triage_text 的收敛判定在纯文本块上进行，含标签的键对收敛不可见，对应块会留在 suspect 里使 `--commit` 中止（此时人工确认 `check_y_freshness` 通过后按对人工提交，message 注明）。
   - 键在全卷 X 中的命中数必须恰为预期（防误伤，短键务必实测计数）。
   - 回钉/插入类规则的键不得命中旧文本（否则在旧文本上重复插入）；把键加长到只匹配新文本。
   - 默认写分卷规则限定作用域；跨卷通用的高置信缺陷才进 `_common.tsv`。
@@ -156,12 +156,12 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 - 两侧同步的 xhtml rename：正常同步，单独成 commit。
 - 仅 X 侧的二进制/增删/rename：X 是上游镜像，按性质单独成 commit（`--commit` 会将其列为未覆盖改动并中止，人工提交后重跑即可）。
 
-## 7. 规则失活验证（s6a → s6b，可重跑）
+## 7. 规则失活验证（commit_adopted_x → report_inactive_rules，可重跑）
 
-规则采纳/收敛块随 s5 批发提交；s6a 在分类时导出 s6b 候选（累积制 `adopted_rules.json`：与既有候选合并，收敛用到的规则 ∪ 命中改动块旧文本的规则 ∪ 规则失效块命中的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」两种失效路径，s6b 消费后剔除）。s6a/s6b 均幂等可重跑。
+规则采纳/收敛块随 triage_text 批发提交；commit_adopted_x 在分类时导出 report_inactive_rules 候选（累积制 `adopted_rules.json`：与既有候选合并，收敛用到的规则 ∪ 命中改动块旧文本的规则 ∪ 规则失效块命中的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」两种失效路径，report_inactive_rules 消费后剔除）。两者均幂等可重跑。
 
-- **s6a**：导出上述候选；X 侧仍有规则采纳/失效收敛改动未收编时按块提交（规则采纳块提交 X 侧 `fix: sync X/<rel>（N 处文本修订，Y 侧规则渲染）`，规则失效型收敛块成对提交）。支持 `--dry-run`。
-- **s6b**：逐条机械验证候选规则是否失活——从管道移除该条后 fixed() 在
+- **commit_adopted_x**：导出上述候选；X 侧仍有规则采纳/失效收敛改动未收编时按块提交（规则采纳块提交 X 侧 `fix: sync X/<rel>（N 处文本修订，Y 侧规则渲染）`，规则失效型收敛块成对提交）。支持 `--dry-run`。
+- **report_inactive_rules**：逐条机械验证候选规则是否失活——从管道移除该条后 fixed() 在
   **HEAD 与工作区**的 X 上输出均不变 → 当前失活，报告；否则报告首个
   反例（规则仍在他处生效）。失活规则保留在 rules/ 中不删除：X 持续增长，
   错误类规则可能在新内容复发，删除会把未来的漏校正变成人工审查成本，
@@ -172,4 +172,4 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 ## 8. 每批提交后的收尾
 
-s5 `--commit` 末尾自动 `git add -A` 并核验工作区：有任何未被文本对覆盖的改动（二进制、rename、仅单侧增删等）即列出并中止，人工按性质提交后重跑 `--finish`，直至输出「工作区已清零」。
+triage_text `--commit` 末尾自动 `git add -A` 并核验工作区：有任何未被文本对覆盖的改动（二进制、rename、仅单侧增删等）即列出并中止，人工按性质提交后重跑 `--finish`，直至输出「工作区已清零」。
