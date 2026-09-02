@@ -63,7 +63,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 - **NUL 分隔**：路径含空格/中文，解析 `git status --porcelain`、`-–name-status` 等输出一律加 `-z`。注意 **`-z` 模式下 rename 的两个路径顺序反转**（省略 `->`，输出为 `to\0from`，与非 z 模式相反）。
 - **批量读 git 对象**：逐个 `git show HEAD:path` 起上千个子进程很慢；改用 `git ls-tree -r -z HEAD` 取 path→sha 映射，再挂一个持久的 `git cat-file --batch` 进程按需读内容。
 - **构造「部分改动」的暂存版本**（如只提交文本之外的版式变化）：在内存中拼出中间版本内容 → `git hash-object -w --stdin` 写成 blob → `git update-index --cacheinfo <mode>,<sha>,<path>` 更新索引。**工作区文件不动**，剩余改动自动留作未提交。
-- **按路径部分提交**：全部改动已暂存时，逐文件提交用 `git commit -m msg -- <paths>`（提交工作区状态，其余暂存项不受影响）。不要用「reset 全部再重新 add」的循环，除非像 rename 那样必须先精确重建索引。
+- **按路径部分提交**：全部改动已暂存时，逐文件提交用 `git commit -m msg -- <paths>`（提交工作区状态，其余暂存项不受影响）。不要用「reset 全部再重新 add」的循环，除非像 rename 那样必须先精确重建索引。**分流在途期间索引长期保持大量暂存，任何提交（含文档/脚本这类无关提交）都必须带路径限定**，否则裸 `git commit` 会把全部在途暂存卷进去。
 - **重建索引提交法**（用于 rename/部分版本）：保存目标文件的 `git ls-files -s -z` 条目 → `git reset -q` → `git update-index -z --index-info` 喂回条目 → 校验暂存区恰好是目标集合 → commit → `git add -A` 恢复其余暂存。
 - **Python 侧路径匹配**：`glob` 会把卷目录名的 `[S1_01]` 当字符类，静默匹配 0 个文件（检索假阴性）；遍历用 `os.listdir`/`os.walk` 或先 `glob.escape`。
 - **Python 生成清单喂 bash 循环**：Windows 文本模式写出 `\r\n`，`while read` 读入的路径带尾 `\r`，git 路径匹配全部失败；先 `tr -d '\r'`，或全程在 Python 内处理。
