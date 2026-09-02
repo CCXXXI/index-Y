@@ -21,7 +21,14 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_triage import apply_blocks, chunk_changes, commit_paths, git
+from lib_triage import (
+    CatFile,
+    apply_blocks,
+    chunk_changes,
+    commit_paths,
+    git,
+    head_sha_map,
+)
 from s1_commit_image_renames import STATE_DIR
 from s5_triage_text import classify, term_summary
 
@@ -94,6 +101,15 @@ def main() -> None:
             with open(xp, "wb") as f:
                 f.write(saved)
         git("add", "-A")
+
+    # adopted 提交已推进 HEAD：rulekilled 的中间版本必须以新 HEAD 为基底
+    # 重建，否则同文件已提交的 adopted 块会被成对提交静默回滚
+    hm2 = head_sha_map()
+    cf2 = CatFile()
+    for p in (p for rel in pairs_by_rel for p in ("X/" + rel, "Y/" + rel)):
+        if p in hm2:
+            head[p] = cf2.read(hm2[p])
+    cf2.close()
 
     # 规则失效型收敛块对：成对提交（X/Y 同块，新文本两侧逐字一致）
     for rel, ps in pairs_by_rel.items():
