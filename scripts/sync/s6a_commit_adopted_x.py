@@ -28,13 +28,17 @@ from lib_triage import (
     commit_paths,
     git,
     head_sha_map,
+    triage_parser,
 )
 from s1_commit_image_renames import STATE_DIR
 from s5_triage_text import classify, term_summary
 
 
 def main() -> None:
-    dry_run = "--dry-run" in sys.argv
+    parser = triage_parser(__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只打印将提交的块与规则候选，不实际提交")
+    dry_run = parser.parse_args().dry_run
     r = classify()
     pairs_by_rel, head, work = r["pairs_by_rel"], r["head"], r["work"]
     structural_ok = r.get("structural_ok", set())

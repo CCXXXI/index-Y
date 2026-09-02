@@ -52,6 +52,7 @@ from lib_triage import (
     head_sha_map,
     norm_ws,
     text_chunks,
+    triage_parser,
 )
 from s1_commit_image_renames import STATE_DIR
 from x2y import fixed, fixes
@@ -432,7 +433,10 @@ def classify() -> dict:
 
 
 def main() -> None:
-    do_commit = "--commit" in sys.argv
+    parser = triage_parser(__doc__)
+    parser.add_argument("--commit", action="store_true",
+                        help="门控通过后批发提交全部改动；默认只分类导出审查材料")
+    do_commit = parser.parse_args().commit
     r = classify()
     pairs_by_rel = r["pairs_by_rel"]
     complex_rels, new_only = r["complex"], r["new_files"]

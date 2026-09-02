@@ -5,6 +5,7 @@
 格式：每行 `旧<TAB>新`（均为 regex 源文本，删除型规则 new 为空、行尾是 tab），
 # 开头为注释，空行忽略。应用顺序：分卷规则先于通用规则，文件内自上而下。
 """
+import argparse
 import shutil
 import sys
 from pathlib import Path
@@ -77,4 +78,7 @@ def x2y():
 
 
 if __name__ == "__main__":
+    argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     x2y()

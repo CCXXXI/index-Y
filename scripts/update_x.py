@@ -1,12 +1,12 @@
-"""用法：uv run python scripts/update_x.py <上游下载的 zip 路径>
+"""同步上游 X 版的完整流程：
 
-同步上游 X 版的完整流程：
 1. 解压 zip，找到其中所有 epub（支持完整下载或部分挑选两种情况）；
 2. 每个 epub 解压后整体替换 X/ 下的同名文件夹——旧版先整个删除，
    防止上游文件改名或删除后残留旧文件；
 3. 全部替换完成后重跑 x2y.py 重新生成 Y/。
 """
 
+import argparse
 import shutil
 import sys
 import tempfile
@@ -20,9 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    zip_path = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("zip", type=Path, help="上游下载的 zip 路径")
+    args = parser.parse_args()
+    zip_path: Path = args.zip
     x_dir = Path("X")
 
     with zipfile.ZipFile(zip_path) as outer:

@@ -1,5 +1,6 @@
 """以当前时间创建并推送 v20260826T1008 格式的 tag，触发 release workflow。"""
 
+import argparse
 import subprocess
 import sys
 from datetime import datetime
@@ -12,6 +13,7 @@ def git(*args: str) -> str:
 
 
 def main() -> None:
+    argparse.ArgumentParser(description=__doc__).parse_args()
     tag = datetime.now().astimezone().strftime("v%Y%m%dT%H%M")
     if tag in git("tag", "-l").splitlines():
         sys.exit(f"error: tag {tag} 已存在（同一分钟内重复运行？）")

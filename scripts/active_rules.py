@@ -7,13 +7,9 @@
 （分卷段先于通用段，段内自上而下）中移除后，范围内某文本文件的最终
 输出发生改变；仅命中但被后续规则再收敛的不算生效。扫描对象为工作区 X
 中的 .xhtml/.opf/.ncx（与 x2y.py 的 TEXT_EXT 一致）。
-
-用法：uv run python scripts/active_rules.py <卷> [章节]
-  <卷>：X/ 下卷目录名或其唯一子串（如 S4_01）。
-  [章节]：可选，卷内文本文件相对路径的子串（如 Chapter1 或 S4_01-04）；
-         匹配到多个文件时全部纳入范围。
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -128,20 +124,25 @@ def scan(vol: str, files: list[Path], seq: list[dict]) -> dict:
 
 
 def main() -> int:
-    args = sys.argv[1:]
-    if not args or len(args) > 2 or args[0] in ("-h", "--help"):
-        print(__doc__.strip())
-        return 0 if args else 1
-    vol = pick_volume(args[0])
-    files = pick_files(vol, args[1] if len(args) == 2 else None)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("volume", metavar="卷",
+                        help="X/ 下卷目录名或其唯一子串（如 S4_01）")
+    parser.add_argument("chapter", metavar="章节", nargs="?",
+                        help="卷内文本文件相对路径的子串（如 Chapter1 或 "
+                             "S4_01-04）；匹配到多个文件时全部纳入范围")
+    args = parser.parse_args()
+    vol = pick_volume(args.volume)
+    files = pick_files(vol, args.chapter)
     rules = load_rules()
     seq = ([r for r in rules if r["section"] == vol]
            + [r for r in rules if r["section"] == "*"])
     active = scan(vol, files, seq)
 
     head = f"范围：X/{vol}"
-    if len(args) == 2:
-        head += f" 内匹配「{args[1]}」的 {len(files)} 个文本文件"
+    if args.chapter is not None:
+        head += f" 内匹配「{args.chapter}」的 {len(files)} 个文本文件"
     else:
         head += f"（{len(files)} 个文本文件）"
     print(head)

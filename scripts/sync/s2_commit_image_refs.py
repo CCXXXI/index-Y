@@ -11,12 +11,22 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import TEXT_EXT, CatFile, git, head_sha_map, stage_content
+from lib_triage import (
+    TEXT_EXT,
+    CatFile,
+    git,
+    head_sha_map,
+    stage_content,
+    triage_parser,
+)
 from s1_commit_image_renames import STATE_DIR
 
 
 def main() -> None:
-    dry = "--dry-run" in sys.argv
+    parser = triage_parser(__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只统计，不实际提交")
+    dry = parser.parse_args().dry_run
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if not os.path.exists(map_path):
         raise SystemExit(f"缺少 {map_path}，请先运行 s1_commit_image_renames.py")

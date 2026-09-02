@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import regex as re
-from lib_triage import TEXT_EXT, repo_root
+from lib_triage import TEXT_EXT, repo_root, triage_parser
 from x2y import fixes
 
 
@@ -21,6 +21,7 @@ def fixed(vol: str, content: str) -> str:
 
 
 def main() -> int:
+    triage_parser(__doc__).parse_args()
     root = repo_root()
     stale = []
     for vol in sorted(os.listdir(os.path.join(root, "X"))):

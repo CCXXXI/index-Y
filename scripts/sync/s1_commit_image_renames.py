@@ -9,14 +9,17 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import IMG_EXT, git, repo_root, staged_renames
+from lib_triage import IMG_EXT, git, repo_root, staged_renames, triage_parser
 
 # 分流脚本间的共享状态目录（rename 映射、审查材料、s6b 候选规则），已 gitignore
 STATE_DIR = os.path.join(repo_root(), ".triage")
 
 
 def main() -> None:
-    dry = "--dry-run" in sys.argv
+    parser = triage_parser(__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只统计并写 rename 映射，不实际提交")
+    dry = parser.parse_args().dry_run
     git("add", "-A")  # 统一从「全部暂存」状态出发
     pairs = staged_renames()
     img = [(f, t) for f, t in pairs if t.lower().endswith(IMG_EXT)]

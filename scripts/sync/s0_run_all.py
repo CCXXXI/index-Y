@@ -11,6 +11,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lib_triage import triage_parser
+
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -23,7 +26,11 @@ def run(script: str, *args: str) -> None:
 
 
 def main() -> None:
-    if "--finish" in sys.argv:
+    parser = triage_parser(__doc__)
+    parser.add_argument("--finish", action="store_true",
+                        help="人工审查后收尾：s5 --commit → s6a → s6b")
+    args = parser.parse_args()
+    if args.finish:
         run("check_y_freshness.py")  # 批发提交的不变式前提：Y == x2y(X)
         run("s5_triage_text.py", "--commit")
         run("s6a_commit_adopted_x.py")

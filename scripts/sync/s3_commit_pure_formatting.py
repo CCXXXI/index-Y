@@ -17,11 +17,15 @@ from lib_triage import (
     git,
     head_sha_map,
     is_pure_formatting,
+    triage_parser,
 )
 
 
 def main() -> None:
-    dry = "--dry-run" in sys.argv
+    parser = triage_parser(__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只统计，不实际提交")
+    dry = parser.parse_args().dry_run
     git("add", "-A")
     entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
     cands = [e[3:] for e in entries

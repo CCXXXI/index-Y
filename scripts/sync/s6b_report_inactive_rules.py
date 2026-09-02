@@ -31,6 +31,7 @@ from lib_triage import (
     CatFile,
     head_sha_map,
     repo_root,
+    triage_parser,
 )
 from s1_commit_image_renames import STATE_DIR
 from x2y import fixes
@@ -90,6 +91,7 @@ def rule_present(key: tuple) -> bool:
 
 
 def main() -> int:
+    triage_parser(__doc__).parse_args()
     cand_path = os.path.join(STATE_DIR, "adopted_rules.json")
     if not os.path.exists(cand_path):
         print("无候选：先运行 s6a_commit_adopted_x.py")

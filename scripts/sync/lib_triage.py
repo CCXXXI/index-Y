@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import argparse
 import difflib
 import os
 import re
@@ -24,6 +25,13 @@ def repo_root() -> str:
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                        capture_output=True, env=ENV, check=True)
     return r.stdout.decode().strip()
+
+
+def triage_parser(description: str) -> argparse.ArgumentParser:
+    """分流脚本统一的命令行解析器：-h 原样展示模块 docstring。"""
+    return argparse.ArgumentParser(
+        description=description,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
 
 
 def git(*args: str, input_bytes: bytes | None = None) -> bytes:
