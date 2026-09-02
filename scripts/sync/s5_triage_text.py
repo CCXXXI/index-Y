@@ -41,7 +41,6 @@ from collections import Counter, defaultdict
 import regex as re  # 规则含 \p{}，stdlib re 不支持
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib_triage import (
     CatFile,
     aligned_chunks,
@@ -496,7 +495,7 @@ def main() -> None:
     if not do_commit:
         clean_scratch()
         print("审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
-              "uv run python scripts/x2y.py，再带 --commit 运行")
+              "uv run python scripts/sync/x2y.py，再带 --commit 运行")
         return
 
     # 提交门：任何未收敛/未处理块都中止——先写规则、重跑 x2y 后再来。
@@ -508,7 +507,7 @@ def main() -> None:
                         + "、".join(complex_rels[:5]))
     if problems:
         print("中止：存在未处理改动。为对应文本写 x2y 规则（校正或回钉旧文本），"
-              "重跑 uv run python scripts/x2y.py 后重新 --commit：")
+              "重跑 uv run python scripts/sync/x2y.py 后重新 --commit：")
         for p in problems:
             print("  -", p)
         raise SystemExit(1)

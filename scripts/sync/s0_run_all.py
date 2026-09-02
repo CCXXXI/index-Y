@@ -40,10 +40,10 @@ def update_x(zip_path: Path) -> None:
         raise SystemExit(
             "错误：工作区有未提交改动，拒绝并入新上游（上轮未收尾，在途审查"
             "会被新版顶掉）。先 --finish 收尾；确认放弃在途审查则手动运行 "
-            "uv run python scripts/update_x.py <zip>")
+            "uv run python scripts/sync/update_x.py <zip>")
     if not zip_path.is_file():
         raise SystemExit(f"错误：zip 不存在：{zip_path}")
-    run(os.path.join(os.pardir, "update_x.py"), str(zip_path))
+    run("update_x.py", str(zip_path))
 
 
 def main() -> None:

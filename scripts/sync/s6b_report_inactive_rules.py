@@ -25,7 +25,6 @@ import sys
 import regex as re  # 规则含 \p{}，stdlib re 不支持
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib_triage import (
     TEXT_EXT,
     CatFile,

@@ -13,7 +13,7 @@ from pathlib import Path
 import regex as re
 from tqdm import tqdm
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 

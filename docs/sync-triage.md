@@ -9,14 +9,14 @@
 uv run python scripts/sync/s0_run_all.py <上游.zip>
 # 带 zip 要求工作区干净：上轮未收尾会被拒绝（在途审查会被新版顶掉）——
 # 先 --finish 收尾；确认放弃在途审查要强行并入（跨轮残留安全，见下）时，
-# 手动 uv run python scripts/update_x.py <zip>
+# 手动 uv run python scripts/sync/update_x.py <zip>
 
 # ===== 在途分流中重跑（不带 zip；人工审查前） =====
 uv run python scripts/sync/s0_run_all.py
 
 # ===== 人工审查 =====
 # 审查 review_changes.txt / suspect_changes.txt，
-# 为可疑改动写 x2y 规则（校正或回钉，见第 6 节），重跑 uv run python scripts/x2y.py
+# 为可疑改动写 x2y 规则（校正或回钉，见第 6 节），重跑 uv run python scripts/sync/x2y.py
 
 # ===== 审查后收尾（自动，工作区清零） =====
 uv run python scripts/sync/s0_run_all.py --finish
@@ -50,7 +50,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 - 症状：`diff` 桶（两侧不一致）异常多；「仅 X 改动」异常多；抽查发现 Y 缺 DOCTYPE/新图名/上游文本修订。
 - 根因：x2y.py 的输出 = `copytree(X)` + fixes，X 若在跑完后又更新，Y 即滞后。
 - 验证：用 `regex` 模块（规则含 `\p{}`，stdlib `re` 不支持）复算 `fixed(vol, X内容)` 与 Y 文件对比。
-- 处理：`uv run python scripts/x2y.py` 重跑后重新走全流程。之前的提交无需重做——各批次的校验逻辑（机械变换逐行验证、改动集完全相等才准入）保证滞后只会造成漏收、不会造成错收。
+- 处理：`uv run python scripts/sync/x2y.py` 重跑后重新走全流程。之前的提交无需重做——各批次的校验逻辑（机械变换逐行验证、改动集完全相等才准入）保证滞后只会造成漏收、不会造成错收。
 - 注意：重跑后 Y 树会涌现整批机械改动（图片重命名、格式 wave），按批次 1-4 同样处理即可。
 
 ## 0.5 分流中途修改规则（含捞回历史规则）
@@ -58,7 +58,7 @@ s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材�
 分流进行中（工作区有在途改动时）改规则，有触发的规则会使 Y 滞后、HEAD 上 fixed(X) == Y 失效。用 stash 隔离后落地：
 
 1. `git stash push -u`（必须 `-u`，在途可能含 untracked 新文件）；
-2. 改 `rules/`，重跑 `uv run python scripts/x2y.py`；
+2. 改 `rules/`，重跑 `uv run python scripts/sync/x2y.py`；
 3. 验证 Y 侧 diff 的每个 hunk 都是规则效果，把规则与 Y 侧改动作为单个 commit 提交——这一步让新 HEAD 上 fixed(X) == Y 重新成立；
 4. `git stash pop`（同一文件内规则效果与在途改动不重叠时自动合并）；
 5. `check_y_freshness` 通过后方可继续分流；若 review 材料已生成，重跑 s5 重新导出（幂等）。

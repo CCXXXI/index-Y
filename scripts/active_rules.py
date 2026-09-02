@@ -17,8 +17,8 @@ from pathlib import Path
 import colorama
 import regex as re
 from colorama import Fore, Style
+from sync.x2y import load_rule_records
 from tqdm import tqdm
-from x2y import load_rule_records
 
 ROOT = Path(__file__).parent.parent
 X_DIR = ROOT / "X"
