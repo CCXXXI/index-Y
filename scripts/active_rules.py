@@ -53,17 +53,46 @@ def pick_files(vol: str, chap: str | None) -> list[Path]:
     return hits
 
 
+def trace_pos(original: str, seq: list[dict], i: int, pos: int) -> int | None:
+    """把 pos（规则 i 应用前文本中的位置）回溯到 original 中的位置。
+    位置落入前置规则改写的区间（文本是前置规则的产物）时返回 None。"""
+    history = []
+    text = original
+    for r in seq[:i]:
+        spans = []
+
+        def repl(m_, _spans=spans, _new=r["new"]):
+            _spans.append((m_.start(), m_.end(), len(m_.expand(_new))))
+            return m_.expand(_new)
+
+        text = re.sub(r["old"], repl, text)
+        history.append(spans)
+    for spans in reversed(history):
+        shift = 0
+        for s, e, nlen in spans:
+            ns = s + shift  # 该替换区间在替换后文本中的起点
+            if pos < ns:
+                pos -= shift
+                break
+            if pos < ns + nlen:
+                return None
+            shift += nlen - (e - s)
+        else:
+            pos -= shift
+    return pos
+
+
 def first_point(vol: str, fidx: int, path: Path,
-                original: str, pre: str, m) -> dict:
-    """定位首个匹配：优先回溯到 X 原文位置；匹配文本本身是前置规则的产物时
-    （在原文中找不到），退化为规则应用时文本中的位置并加注。"""
+                original: str, pre: str, m, seq: list[dict], i: int) -> dict:
+    """定位首个匹配：回溯到 X 原文位置；匹配文本本身是前置规则的产物时
+    （落入被前置规则改写的区间），退化为规则应用时文本中的位置并加注。"""
     rel = path.relative_to(X_DIR / vol).as_posix()
     matched = m.group(0)
-    idx = original.find(matched) if matched else -1
-    if idx >= 0:
-        base, s, note = original, idx, ""
-    else:
+    s = trace_pos(original, seq, i, m.start())
+    if s is None or original[s:s + len(matched)] != matched:
         base, s, note = pre, m.start(), "（位置为规则应用时文本，已被前置规则改写）"
+    else:
+        base, note = original, ""
     e = s + len(matched)
     line = base.count("\n", 0, s) + 1
     w = 30
@@ -91,7 +120,7 @@ def scan(vol: str, files: list[Path], seq: list[dict]) -> dict:
                 out = re.sub(r["old"], r["new"], out)
             if out != content:
                 active[i] = first_point(vol, fidx, path, original, pre,
-                                        re.search(seq[i]["old"], pre))
+                                        re.search(seq[i]["old"], pre), seq, i)
     return active
 
 
