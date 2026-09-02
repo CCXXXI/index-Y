@@ -14,7 +14,9 @@ import io
 import sys
 from pathlib import Path
 
+import colorama
 import regex as re
+from colorama import Fore, Style
 from tqdm import tqdm
 
 ROOT = Path(__file__).parent.parent
@@ -24,6 +26,7 @@ TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
 if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+colorama.init()  # 包装 stdout/stderr；非 TTY（重定向到文件/管道）时自动剥离颜色码
 
 
 def load_rules() -> list[dict]:
@@ -99,7 +102,8 @@ def first_point(vol: str, fidx: int, path: Path,
     line = base.count("\n", 0, s) + 1
     w = 30
     a, b = max(0, s - w), min(len(base), e + w)
-    snip = re.sub(r"\s+", " ", base[a:s] + "【" + matched + "】" + base[e:b])
+    snip = re.sub(r"\s+", " ", f"{base[a:s]}{Fore.RED}{Style.BRIGHT}{matched}"
+                               f"{Style.RESET_ALL}{base[e:b]}")
     return {"fidx": fidx, "rel": rel, "line": line,
             "snip": "…" + snip.strip() + "…", "note": note}
 
@@ -147,22 +151,27 @@ def main() -> int:
         head += f" 内匹配「{args.chapter}」的 {len(files)} 个文本文件"
     else:
         head += f"（{len(files)} 个文本文件）"
-    print(head)
+    print(f"{Style.BRIGHT}{head}{Style.RESET_ALL}")
     if not active:
         print("范围内无生效规则。")
         return 0
     ordered = sorted(active, key=lambda i: (active[i]["fidx"],
                                             active[i]["line"], i))
     n_vol = sum(1 for i in ordered if seq[i]["section"] == vol)
-    print(f"生效规则 {len(ordered)} 条"
+    print(f"{Style.BRIGHT}"
+          f"生效规则 {len(ordered)} 条"
           f"（分卷段 {n_vol} · 通用段 {len(ordered) - n_vol}），"
-          "按首次生效点排序：\n")
+          f"按首次生效点排序：{Style.RESET_ALL}\n")
     for i in ordered:
         r, p = seq[i], active[i]
-        sec = "分卷" if r["section"] == vol else "通用"
+        sec, sec_color = (("分卷", Fore.CYAN) if r["section"] == vol
+                          else ("通用", Fore.MAGENTA))
         new = r["new"] if r["new"] else "（删除）"
-        print(f"[{sec}:{r['lineno']}] {r['old']} -> {new}")
-        print(f"  首次生效 {p['rel']}:{p['line']}{p['note']}")
+        print(f"{sec_color}[{sec}:{r['lineno']}]{Style.RESET_ALL} "
+              f"{Fore.RED}{r['old']}{Style.RESET_ALL} -> "
+              f"{Fore.GREEN}{new}{Style.RESET_ALL}")
+        print(f"  首次生效 {Fore.CYAN}{p['rel']}:{p['line']}{Style.RESET_ALL}"
+              f"{Fore.YELLOW}{p['note']}{Style.RESET_ALL}")
         print(f"  {p['snip']}")
     return 0
 

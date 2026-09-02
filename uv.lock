@@ -16,6 +16,7 @@ name = "index-y"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "colorama" },
     { name = "regex" },
     { name = "tqdm" },
 ]
@@ -28,6 +29,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "colorama", specifier = ">=0.4.6" },
     { name = "regex", specifier = ">=2025.11.3" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
