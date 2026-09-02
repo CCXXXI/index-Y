@@ -34,6 +34,7 @@
 import difflib
 import json
 import os
+import shutil
 import sys
 from collections import Counter, defaultdict
 
@@ -54,6 +55,27 @@ from lib_triage import (
 )
 from s1_commit_image_renames import STATE_DIR
 from x2y import fixed, fixes
+
+# .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
+MANAGED_STATE = {"rename_map.json", "plan.json", "review_changes.txt",
+                 "suspect_changes.txt", "adopted_rules.json"}
+
+
+def clean_scratch() -> None:
+    """默认模式导出新材料 = 新一轮审查开始：把上轮审查草稿轮转入 prev/
+    （仅保留一轮），防止旧 verdict 被误当本轮结论。--commit 模式不清：
+    中止时审查仍在继续，草稿还有用。"""
+    scratch = [f for f in os.listdir(STATE_DIR)
+               if f not in MANAGED_STATE and f != "prev"
+               and os.path.isfile(os.path.join(STATE_DIR, f))]
+    if not scratch:
+        return
+    prev = os.path.join(STATE_DIR, "prev")
+    shutil.rmtree(prev, ignore_errors=True)
+    os.makedirs(prev)
+    for f in scratch:
+        os.replace(os.path.join(STATE_DIR, f), os.path.join(prev, f))
+    print(f"上轮审查草稿 {len(scratch)} 个移入 {prev}")
 
 
 def apply_rules(vol: str, s: str) -> str:
@@ -480,6 +502,7 @@ def main() -> None:
         print(f"疑似上游错误: {os.path.join(STATE_DIR, 'suspect_changes.txt')}")
 
     if not do_commit:
+        clean_scratch()
         print("审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
               "uv run python scripts/x2y.py，再带 --commit 运行")
         return
@@ -539,6 +562,10 @@ def main() -> None:
         print("\n".join(left[:30]))
         raise SystemExit(1)
     print(f"完成。提交 {committed} 对，工作区已清零")
+    # 轮次结束：rename 映射只服务于轮内 s1→s2，删除以防跨轮累积
+    map_path = os.path.join(STATE_DIR, "rename_map.json")
+    if os.path.exists(map_path):
+        os.remove(map_path)
 
 
 if __name__ == "__main__":

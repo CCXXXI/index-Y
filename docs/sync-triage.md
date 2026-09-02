@@ -33,6 +33,8 @@ uv run python scripts/sync/s6b_report_inactive_rules.py       # 报告失活规�
 
 s1–s4 支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
+`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：s5 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 s6b 对当前 HEAD 与工作区机械复验后剔除。两个防护：s5 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；s5 `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 s1→s2）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
+
 各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：s1 无图片重命名时也会写出空 `rename_map.json`，s2 读到空映射直接跳过。
 
 ## 0. 前置校验：Y 必须与当前 X 同步
