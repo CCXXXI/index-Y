@@ -34,13 +34,7 @@ from lib_triage import (
     triage_parser,
 )
 from s1_commit_image_renames import STATE_DIR
-from x2y import fixes
-
-
-def fixed_with(rules: dict, vol: str, content: str) -> str:
-    for old, new in rules.get(vol, []) + rules["*"]:
-        content = re.sub(old, new, content)
-    return content
+from x2y import fixed, fixes
 
 
 def differs_without(vol: str, content: str, skip: tuple) -> bool:
@@ -63,7 +57,7 @@ def differs_without(vol: str, content: str, skip: tuple) -> bool:
             fired = True
             continue
         out = re.sub(o, n, out)
-    return fired and out != fixed_with(fixes, vol, content)
+    return fired and out != fixed(vol, content)
 
 
 def x_text_files():

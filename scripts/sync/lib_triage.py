@@ -43,15 +43,13 @@ def git(*args: str, input_bytes: bytes | None = None) -> bytes:
     return r.stdout
 
 
-def status_entries() -> list[tuple[str, str, str | None]]:
-    """暂存区+工作区状态。返回 (XY, path, rename_from_or_None)。"""
-    out = []
-    for e in git("status", "--porcelain", "-z").decode("utf-8").split("\0"):
-        if not e:
-            continue
-        out.append((e[:2], e[3:], None))
-    # rename 在 -z 下占两个条目槽位：重新按 diff --cached 解析 staged rename
-    return out
+def modified_text_files() -> list[str]:
+    """统一从「全部暂存」状态出发，返回修改的文本文件路径（不含 rename）。"""
+    git("add", "-A")
+    entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
+    return [e[3:] for e in entries
+            if e and e[0] == "M" and not e.startswith("R")
+            and e[3:].lower().endswith(TEXT_EXT)]
 
 
 def staged_renames() -> list[tuple[str, str]]:

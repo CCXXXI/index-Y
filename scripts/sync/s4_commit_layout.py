@@ -10,10 +10,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import (
-    TEXT_EXT,
     CatFile,
     git,
     head_sha_map,
+    modified_text_files,
     norm_ws,
     revert_text_chunks,
     stage_content,
@@ -27,11 +27,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="只统计，不实际提交")
     dry = parser.parse_args().dry_run
-    git("add", "-A")
-    entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
-    cands = [e[3:] for e in entries
-             if e and e[0] == "M" and not e.startswith("R")
-             and e[3:].lower().endswith(TEXT_EXT)]
+    cands = modified_text_files()
     print(f"候选 M 文本文件 {len(cands)}")
 
     hm = head_sha_map()

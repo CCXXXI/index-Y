@@ -16,7 +16,7 @@
    - 两侧都有改动且 F(x) == F(y)          → 正常同步候选对（"sync"）
    - 两侧都有改动且 F(x) ⊃ F(y)，X 多出的片段能被 x2y 规则解释（收敛）
                                           → 规则收敛块对（"mixed"）
-   - 仅 X 有改动且能收敛（或规则管道等价：apply_rules 后新旧 X 文本一致，
+   - 仅 X 有改动且能收敛（或规则管道等价：fixed 后新旧 X 文本一致，
      即上游改动整个落在规则覆盖内、fixed 后 Y 不变——覆盖多步推导这类
      片段级收敛看不见的情形）       → 规则采纳（"adopted"）
    - 其余（Y 有多余片段 / 仅 Y 有改动 / 不收敛）→ 疑似上游错误（"suspect"）
@@ -43,13 +43,13 @@ import regex as re  # 规则含 \p{}，stdlib re 不支持
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib_triage import (
-    TEXT_EXT,
     CatFile,
     aligned_chunks,
     commit_paths,
     frag_set,
     git,
     head_sha_map,
+    modified_text_files,
     norm_ws,
     text_chunks,
     triage_parser,
@@ -77,13 +77,6 @@ def clean_scratch() -> None:
     for f in scratch:
         os.replace(os.path.join(STATE_DIR, f), os.path.join(prev, f))
     print(f"上轮审查草稿 {len(scratch)} 个移入 {prev}")
-
-
-def apply_rules(vol: str, s: str) -> str:
-    """对文本应用该卷全部 x2y 规则（fixed 的规则部分），供收敛验证。"""
-    for ro, rn in fixes.get(vol, []) + fixes["*"]:
-        s = re.sub(ro, rn, s)
-    return s
 
 
 def term_summary(o: str, n: str, maxlen: int = 40) -> str:
@@ -181,7 +174,7 @@ def classify_block(vol: str, rules: list, xo: str, xn: str,
     # Y 侧多出片段：规则因上游编辑获得触发语境（如编辑引入「所以」触发
     # 由于→因为）。fixed 能分别从新旧 X 文本得到新旧 Y 文本，则两侧差异
     # 纯属规则渲染、X 改动是真实的上游编辑 → sync
-    if apply_rules(vol, xo) == yo and apply_rules(vol, xn) == yn:
+    if fixed(vol, xo) == yo and fixed(vol, xn) == yn:
         return "sync", [], []
     return "suspect", [], []
 
@@ -235,7 +228,7 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
             continue
         _, yi1, yi2, yj1, yj2 = y_by_key[key].pop(0)
         yo_s, yn_s = "\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2])
-        if apply_rules(vol, xo_s) != yo_s or apply_rules(vol, xn_s) != yn_s:
+        if fixed(vol, xo_s) != yo_s or fixed(vol, xn_s) != yn_s:
             pairs.append(("suspect", (xo_s, xn_s), (yo_s, yn_s)))
             gate = False
             continue
@@ -262,12 +255,12 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
 
 def xonly_kind(vol: str, xo: str, xn: str, used: list) -> str:
     """仅 X 有改动的块的分类：片段收敛 → 规则采纳；规则管道等价
-    （apply_rules 后新旧文本一致，即上游改动整个落在规则覆盖范围内，
+    （fixed 后新旧文本一致，即上游改动整个落在规则覆盖范围内，
     fixed 后 Y 不受影响）也是规则采纳——覆盖多步推导（如 `….` 先去点
     再双写省略号得到 `……`）这类片段级收敛看不见的情形。其余 → 疑似。"""
     if convergent(vol, xo, xn, set(), used):
         return "adopted"
-    if apply_rules(vol, xo) == apply_rules(vol, xn):
+    if fixed(vol, xo) == fixed(vol, xn):
         return "adopted"
     return "suspect"
 
@@ -308,11 +301,7 @@ def classify() -> dict:
     - rulekilled_rules: 同构，规则失效型收敛块旧文本命中的规则
     - head/work: 路径 -> bytes（单侧无改动的另一侧以 HEAD 内容充当）
     """
-    git("add", "-A")
-    entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
-    mfiles = [e[3:] for e in entries
-              if e and e[0] == "M" and not e.startswith("R")
-              and e[3:].lower().endswith(TEXT_EXT)]
+    mfiles = modified_text_files()
 
     hm = head_sha_map()
     cf = CatFile()

@@ -9,15 +9,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import regex as re
 from lib_triage import TEXT_EXT, repo_root, triage_parser
-from x2y import fixes
-
-
-def fixed(vol: str, content: str) -> str:
-    for old, new in fixes.get(vol, []) + fixes["*"]:
-        content = re.sub(old, new, content)
-    return content
+from x2y import fixed
 
 
 def main() -> int:
