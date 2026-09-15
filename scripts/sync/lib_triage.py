@@ -3,7 +3,9 @@
 所有脚本约定：
 - 在仓库根目录运行（git rev-parse 自动定位）。
 - 全程 GIT_LITERAL_PATHSPECS=1（路径含 [方括号]，否则被当作 glob）。
-- 解析 git 输出一律 -z。注意 -z 模式 rename 输出顺序为 to\\0from（与非 z 相反）。
+- 解析 git 输出一律 -z。注意 rename 两路径顺序因命令而异：
+  `git status --porcelain -z` 反转为 to\0from；`git diff --name-status -z`
+  与非 z 相同为 from\0to（git 2.55 实测）。
 """
 
 from __future__ import annotations
@@ -61,8 +63,9 @@ def staged_renames() -> list[tuple[str, str]]:
     i = 0
     while i < len(parts):
         assert parts[i].startswith("R"), parts[i]
-        # -z 模式顺序为 to, from（与非 z 相反）
-        pairs.append((parts[i + 2], parts[i + 1]))
+        # diff --name-status 的 -z 与非 z 同为 from, to 顺序
+        # （反转的是 status --porcelain -z）
+        pairs.append((parts[i + 1], parts[i + 2]))
         i += 3
     return pairs
 

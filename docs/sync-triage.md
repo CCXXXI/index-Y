@@ -66,7 +66,7 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 ## 1. 通用 git 操作坑（本仓库路径含中文与方括号）
 
 - **方括号路径**：`[S1_01]...` 会被当作 glob 字符类。所有涉及路径参数的 git 命令必须设环境变量 `GIT_LITERAL_PATHSPECS=1`。
-- **NUL 分隔**：路径含空格/中文，解析 `git status --porcelain`、`-–name-status` 等输出一律加 `-z`。注意 **`-z` 模式下 rename 的两个路径顺序反转**（省略 `->`，输出为 `to\0from`，与非 z 模式相反）。
+- **NUL 分隔**：路径含空格/中文，解析 `git status --porcelain`、`-–name-status` 等输出一律加 `-z`。rename 的两个路径顺序**因命令而异**：`git status --porcelain -z` 反转为 `to\0from`（省略 `->`），而 `git diff --name-status -z` 与非 z 相同为 `from\0to`（git 2.55 实测，勿凭文档记忆推断）。
 - **批量读 git 对象**：逐个 `git show HEAD:path` 起上千个子进程很慢；改用 `git ls-tree -r -z HEAD` 取 path→sha 映射，再挂一个持久的 `git cat-file --batch` 进程按需读内容。
 - **构造「部分改动」的暂存版本**（如只提交文本之外的版式变化）：在内存中拼出中间版本内容 → `git hash-object -w --stdin` 写成 blob → `git update-index --cacheinfo <mode>,<sha>,<path>` 更新索引。**工作区文件不动**，剩余改动自动留作未提交。
 - **按路径部分提交**：全部改动已暂存时，逐文件提交用 `git commit -m msg -- <paths>`（提交工作区状态，其余暂存项不受影响）。不要用「reset 全部再重新 add」的循环，除非像 rename 那样必须先精确重建索引。**分流在途期间索引长期保持大量暂存，任何提交（含文档/脚本这类无关提交）都必须带路径限定**，否则裸 `git commit` 会把全部在途暂存卷进去。
