@@ -26,7 +26,9 @@ def main() -> int:
     root = repo_root()
     triage = os.path.join(root, ".triage")
     with open(os.path.join(triage, "review_blocks.json"), encoding="utf-8") as f:
-        want = {b["id"]: b for b in json.load(f)}
+        blocks = json.load(f)
+    # 兼容无 id 字段的旧格式：id 即块在材料中的位置（与 parse_blocks 一致）
+    want = {b.get("id", i): b for i, b in enumerate(blocks)}
 
     verdicts: dict[int, dict] = {}
     bad = []
