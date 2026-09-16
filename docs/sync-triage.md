@@ -155,7 +155,7 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 - opf 的 `dcterms:modified` 时间戳更新：直接视为正常同步。
 - 新增章节文件（X/Y 同时出现）：验证 Y 与 X 的文本差异能被 x2y.py 规则（含正词条目）解释 → 正常同步。
-- 两侧同步的 xhtml rename：正常同步，单独成 commit。**rename 常捆绑少量文本修订**（相似度 98~99%）：逐对提取 HEAD→工作区的文本块改动（复用 lib_triage 的 text_chunks/difflib 对齐）按正常性标准审查，随 rename 一并提交并在 body 摘要。**含未核实改动的文件整对保持 R 态挂起**（不提交）：rename-only 提交会把该文件变成 M，下轮 triage_text 会把它当正常文本对提走，挂起即失效。
+- 两侧同步的 xhtml rename：正常同步，单独成 commit。**rename 常捆绑少量文本修订**（相似度 98~99%），采用「纯移动 + 文本分流」两步：先 `stage_content` 把 HEAD 内容写到新路径、删旧路径，提交只移动不改内容的纯 rename（全部 R100 程序化验证）；捆绑修订随即成为 M 态，随 triage_text 正常分类进审查材料、按 `fix: sync` 批发提交。**前置机械扫描**：对捆绑改动做片段级 diff，凡含需原文核实改动的文件**整对保持 R 态挂起**（rename 也不提）——rename-only 提交会把文件变成 M，triage_text 会把它当正常文本对提走，挂起即失效。
 - 仅 X 侧的二进制/增删/rename：X 是上游镜像，按性质单独成 commit（`--commit` 会将其列为未覆盖改动并中止，人工提交后重跑即可）。两侧同步的二进制内容替换（如插图更新）：核对两侧逐字节一致后按 `fix: sync <路径>` 单独成 commit。
 
 ## 7. 规则失活验证（commit_adopted_x → report_inactive_rules，可重跑）
