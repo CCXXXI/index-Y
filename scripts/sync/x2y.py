@@ -2,8 +2,11 @@
 
 规则文件：rules/_common.tsv 为全卷通用段；rules/<卷名>.tsv 为分卷段
 （文件名 = X/ 下的卷目录名，无规则的卷不建文件）。
-格式：每行 `旧<TAB>新`（均为 regex 源文本，删除型规则 new 为空、行尾是 tab），
-# 开头为注释，空行忽略。应用顺序：分卷规则先于通用规则，文件内自上而下。
+格式：首行固定表头 `旧<TAB>新<TAB>注释`，规则行每行 `旧<TAB>新<TAB>注释`
+（旧/新为 regex 源文本；注释为纯文本，可空——此时行尾是 tab，须防编辑器
+吞掉，见 .editorconfig；删除型规则 new 为空）。# 开头为非规则行（禁用规则、
+卷级说明），同样须 3 字段；空行禁止。全文件列数一致是 GitHub、PyCharm 等
+严格 TSV 预览正常渲染的前提。应用顺序：分卷规则先于通用规则，文件内自上而下。
 """
 import argparse
 import shutil
@@ -16,6 +19,7 @@ from tqdm import tqdm
 ROOT = Path(__file__).parent.parent.parent
 RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
+HEADER = "旧\t新\t注释"
 
 
 def load_rule_records() -> list[dict]:
@@ -28,17 +32,24 @@ def load_rule_records() -> list[dict]:
         if section != "*" and section not in x_vols:
             errors.append(f"{tsv.name}: 文件名与 X/ 下卷目录不对应")
         seen = {}
-        for lineno, raw in enumerate(
-                tsv.read_text(encoding="utf-8-sig").splitlines(), 1):
-            if not raw or raw.startswith("#"):
-                continue
+        lines = tsv.read_text(encoding="utf-8-sig").splitlines()
+        if not lines or lines[0] != HEADER:
+            errors.append(f"{tsv.name}: 首行须为表头「{HEADER}」")
+            continue
+        for lineno, raw in enumerate(lines[1:], 2):
             fields = raw.split("\t")
-            if len(fields) != 2:
+            if len(fields) != 3:
                 errors.append(
-                    f"{tsv.name}:{lineno}: 字段数 {len(fields)} ≠ 2"
-                    "（删除型规则行尾的 tab 可能被编辑器吞掉）")
+                    f"{tsv.name}:{lineno}: 字段数 {len(fields)} ≠ 3"
+                    "（空字段行尾的 tab 可能被编辑器吞掉；空行禁止）")
                 continue
-            old, new = fields
+            old, new, note = fields
+            if old.startswith("#"):
+                continue
+            if not old:
+                errors.append(
+                    f"{tsv.name}:{lineno}: old 为空（说明行请以 # 开头）")
+                continue
             if old in seen:
                 errors.append(
                     f"{tsv.name}:{lineno}: old 与第 {seen[old]} 行重复")
@@ -48,7 +59,7 @@ def load_rule_records() -> list[dict]:
             except re.error as e:
                 errors.append(f"{tsv.name}:{lineno}: 正则编译失败: {e}")
             records.append({"section": section, "lineno": lineno,
-                            "old": old, "new": new})
+                            "old": old, "new": new, "note": note})
     if errors:
         sys.exit("rules/ 校验失败：\n" + "\n".join(errors))
     return records

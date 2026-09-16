@@ -1,0 +1,5 @@
+root = true
+
+[rules/*.tsv]
+# 规则行的空注释字段以行尾 tab 表示，吞掉会破坏严格的 3 列结构
+trim_trailing_whitespace = false

@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# 规则行的合法行尾 tab（空注释字段）不属于行尾空白缺陷
+rules/*.tsv whitespace=-blank-at-eol
