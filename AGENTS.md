@@ -10,40 +10,18 @@
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
 - `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。
 
+不变式：**X 是上游逐字镜像，Y 是 `x2y(X)` 净化产物。**
+
 ## 脚本开发
 
 - 功能优先调用成熟库实现（如 argparse 解析命令行、colorama 输出颜色），不手写等价逻辑（如自行解析 sys.argv、拼 ANSI 转义序列）。
 - 新增或修改 `scripts/` 后，提交前必须跑通 `uv run ruff check .` 与 `uv run ty check .`（零报告才算通过）。
 
-## 同步上游的工作流
+## 任务流程
 
-上游 X 更新后：运行 `uv run python scripts/sync/run_all.py <下载的 zip>`（先自动执行 update_x 入仓——解压 zip、用其中每个 epub 整体替换 `X/` 下同名文件夹、重跑 `x2y.py` 更新 `Y/`，支持完整下载或部分挑选的 zip；随后自动进入分流。带 zip 要求工作区干净：上轮未收尾会被拒绝，先 `--finish` 收尾，确认放弃在途审查则手动跑 `scripts/sync/update_x.py <zip>` 强行并入），然后把产生的海量改动**分流提交**。
+- **同步上游**（上游 zip 更新入仓并分流提交）：先读 [docs/sync-triage.md](docs/sync-triage.md) 再动手。入口：`uv run python scripts/sync/run_all.py <下载的 zip>`。
+- **阅读校对**（维护者阅读 Y 产物时记下的可疑词句）：先读 [docs/proofreading.md](docs/proofreading.md) 再动手。
 
-### 分流三类规则
+## 提交信息
 
-终态模型：**X 是上游逐字镜像，Y 是 `x2y(X)` 净化产物；每次分流结束工作区必须清零。**
-
-1. **正常同步**：X 和 Y 都有某项改动，且改动看起来正常 → 两边批发提交。
-2. **疑似上游错误**：确认后写成 x2y 规则（能修正写**校正规则**，存疑写**回钉规则**把该句钉回旧译文），重跑 `scripts/sync/x2y.py` 后随批发提交；X 侧照常接收上游原文，Y 侧为规则净化后的文本。可选整理后人工反馈上游（反馈前用 `uv run python scripts/active_rules.py <卷> [章节]` 生成范围内当前生效的规则清单及首次生效点；rules/ 含保留的失活规则，不能直接当作清单）。
-3. **规则采纳/规则渲染差异**：两侧差异能被规则解释（上游采纳规则、规则因上游编辑获得/失去触发语境、回钉/校正规则生效）→ 随批发提交。report_inactive_rules 机械验证并报告失活规则（保留不删：X 持续增长，错误类规则可能在新内容上复发，删除会把未来的漏校正变成人工审查成本，而保留的扫描开销可忽略）。
-
-版式调整、文件重命名、时间戳等机械性改动一律视为正常同步，无需逐项审查。
-
-### 提交顺序（自动分流先行，人工审查最后）
-
-改动量极大（两千+），必须分批提交，每批提交前程序化校验：
-
-1. 图片重命名（单个 commit）
-2. 图片引用更新（opf/xhtml 中的 href/src，单个 commit）
-3. xhtml rename 一律纯移动提交（捆绑修订各回各管道，语义改动入挂起清单，commit_xhtml_renames）
-4. 纯格式化变更（不影响文本显示，单个 commit）
-5. 版式调整（结构/属性变化但文本不变，单个 commit）
-6. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（commit_adopted_x）→ 报告失活规则（report_inactive_rules）
-7. 人工审查：正常块放行；可疑块写 x2y 规则（校正或回钉）并重跑 `scripts/sync/x2y.py` → `triage_text.py --commit` 批发提交全部改动（有未处理块即中止；挂起清单 `.triage/hold.txt` 内的 rel 跳过并单列报告），再补跑 commit_adopted_x/report_inactive_rules
-8. 工作区清零后分流结束
-
-详细的判定逻辑、脚本模式与 git 操作坑见 [docs/sync-triage.md](docs/sync-triage.md)。
-
-### 提交信息
-
-遵循 Conventional Commits。文本同步提交命名 `fix: sync <相对路径>（N 处文本修订）`，X 侧规则渲染差异的提交命名 `fix: sync X/<相对路径>（N 处文本修订，Y 侧规则渲染）`，body 附最小差异摘要（`旧→新`），便于日后回溯与向上游反馈。
+遵循 Conventional Commits；body 附最小差异摘要（`旧→新`），便于日后回溯。各任务的提交命名见对应流程文档。
