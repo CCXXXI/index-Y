@@ -4,7 +4,9 @@
 版式四批提交 → triage_text 分类导出审查材料 → commit_adopted_x →
 report_inactive_rules。
 带 zip 时先跑 update_x.py（上游入仓）再接默认流程——要求工作区干净，
-上轮未收尾会被拒绝（在途审查会被新版顶掉）；在途分流中重跑不带 zip。
+上轮未收尾会被拒绝（在途审查会被新版顶掉）；另校验 HEAD 自洽
+（Y == x2y(X)），拦上轮改 rules/ 后漏跑 x2y.py 的陈旧 Y；在途分流中
+重跑不带 zip。
 --finish（人工审查后）：triage_text --commit → commit_adopted_x →
 report_inactive_rules 收尾。
 
@@ -46,6 +48,16 @@ def update_x(zip_path: Path) -> None:
             "uv run python scripts/sync/update_x.py <zip>")
     if not zip_path.is_file():
         raise SystemExit(f"错误：zip 不存在：{zip_path}")
+    # HEAD 自洽门控：工作区干净时等价于校验 HEAD——上轮改 rules/ 后漏跑
+    # x2y.py 会留下陈旧 Y，本轮重跑 x2y 会把规则补渲染当「仅 Y 改动」混进审查
+    print("\n===== check_y_freshness.py（HEAD 自洽门控） =====", flush=True)
+    r = subprocess.run([sys.executable,
+                        os.path.join(SCRIPTS, "check_y_freshness.py")],
+                       check=False)
+    if r.returncode != 0:
+        raise SystemExit(
+            "HEAD 的 X/Y/rules 不自洽（上轮改 rules/ 后漏跑 x2y.py？）。先重跑 "
+            "uv run python scripts/sync/x2y.py，把 Y 侧规则效果提交，再开始新一轮")
     run("update_x.py", str(zip_path))
 
 

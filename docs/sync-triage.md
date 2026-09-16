@@ -10,6 +10,9 @@ uv run python scripts/sync/run_all.py <上游.zip>
 # 带 zip 要求工作区干净：上轮未收尾会被拒绝（在途审查会被新版顶掉）——
 # 先 --finish 收尾；确认放弃在途审查要强行并入（跨轮残留安全，见下）时，
 # 手动 uv run python scripts/sync/update_x.py <zip>
+# 带 zip 还会先校验 HEAD 自洽（Y == x2y(X)），拦「上轮改 rules/ 后漏跑
+# x2y.py」的陈旧 Y（规则补渲染会当「仅 Y 改动」混进审查）——被拒时重跑
+# x2y.py 并把 Y 侧规则效果提交，再重新起新轮
 
 # ===== 在途分流中重跑（不带 zip；人工审查前） =====
 uv run python scripts/sync/run_all.py
