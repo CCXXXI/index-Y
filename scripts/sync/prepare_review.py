@@ -57,7 +57,7 @@ txt = open(r"@JP_TXT_FIRST@", encoding="utf-8").read()
 for m in re.finditer("锚点", txt):
     print(txt[max(0, m.start()-120):m.end()+120]); print("---")
 - 锚点优先选：①阿拉伯数字；②汉字专名（注意简繁/和制差异：学园→学園、滨→浜、乐→楽、丰→豊、泷→滝、壶→壺、黑→黒，不确定就多试几种）；③新旧译文共有的罕见实词。一个锚点找不到就换同句另一个。
-- 批处理提效：每批 8-12 块写一个脚本同时搜所有锚点（按块打印分隔），一次跑完再逐块判定。
+- 批处理提效：每批 8-12 块写一个脚本同时搜所有锚点（按块打印分隔），一次跑完再逐块判定。临时脚本放 $LOCALAPPDATA/Temp 或仓库外，文件名带任务号前缀（如 t06_find.py）——并发子代理同名文件会互相覆盖。
 
 输出：逐块向 verdict 文件追加一行 JSON：{"id": <块id>, "verdict": "ok"|"suspect"|"unsure"|"unlocated", "cls": "form"|"semantic", "jp": "<原文片段，form 级留空>", "reason": "<≤30字>"}。每审完一批就追加写盘。禁止修改仓库中除该 verdict 文件以外的任何文件。
 
