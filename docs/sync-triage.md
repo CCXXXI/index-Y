@@ -181,6 +181,20 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 难以判断的一律保留，宁漏勿错。
 
+### 大规模 AI 审查（子代理流程）
+
+候选块多、语义改动占比大时（如整卷重译波），派子代理分片对照日文原文审查：
+
+```bash
+uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原文纯文本 + review_chunks/ 任务块 + review_prompts/ 提示词
+# delegate_task 每个 task_NN.md 派一个子代理（建议并发 ≤6，中断可安全重派）
+uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + 导出 suspect/unsure/unlocated
+```
+
+- 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。index-jp 缺原文的卷 prepare 会列出，报用户补充后再核实。
+- 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。
+- review_blocks.json 的块 id 是 verdict 的关联键。verdicts/ 非空时 prepare_review 拒绝重建（防在途任务被换底）；材料更新后需重审时，先聚合存档本轮 verdict，清空 verdicts/ 再重建。
+
 ### 配套机械项
 
 - opf 的 `dcterms:modified` 时间戳更新：直接视为正常同步。
