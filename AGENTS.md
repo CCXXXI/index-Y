@@ -35,11 +35,12 @@
 
 1. 图片重命名（单个 commit）
 2. 图片引用更新（opf/xhtml 中的 href/src，单个 commit）
-3. 纯格式化变更（不影响文本显示，单个 commit）
-4. 版式调整（结构/属性变化但文本不变，单个 commit）
-5. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（commit_adopted_x）→ 报告失活规则（report_inactive_rules）
-6. 人工审查：正常块放行；可疑块写 x2y 规则（校正或回钉）并重跑 `scripts/sync/x2y.py` → `triage_text.py --commit` 批发提交全部改动（有未处理块即中止），再补跑 commit_adopted_x/report_inactive_rules
-7. 工作区清零后分流结束
+3. xhtml rename（纯移动提交 + 捆绑修订挂起清单，commit_xhtml_renames）
+4. 纯格式化变更（不影响文本显示，单个 commit）
+5. 版式调整（结构/属性变化但文本不变，单个 commit）
+6. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（commit_adopted_x）→ 报告失活规则（report_inactive_rules）
+7. 人工审查：正常块放行；可疑块写 x2y 规则（校正或回钉）并重跑 `scripts/sync/x2y.py` → `triage_text.py --commit` 批发提交全部改动（有未处理块即中止），再补跑 commit_adopted_x/report_inactive_rules
+8. 工作区清零后分流结束
 
 详细的判定逻辑、脚本模式与 git 操作坑见 [docs/sync-triage.md](docs/sync-triage.md)。
 

@@ -70,6 +70,7 @@ def main() -> None:
     run("check_y_freshness.py")
     run("commit_image_renames.py")
     run("commit_image_refs.py")
+    run("commit_xhtml_renames.py")
     run("commit_pure_formatting.py")
     run("commit_layout.py")
     run("triage_text.py")

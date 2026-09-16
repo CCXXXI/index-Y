@@ -57,8 +57,9 @@ from lib_triage import (
 from x2y import fixed, fixes
 
 # .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
-MANAGED_STATE = {"rename_map.json", "plan.json", "review_changes.txt",
-                 "suspect_changes.txt", "adopted_rules.json"}
+MANAGED_STATE = {"rename_map.json", "rename_hold.txt", "plan.json",
+                 "review_changes.txt", "suspect_changes.txt",
+                 "adopted_rules.json"}
 
 
 def clean_scratch() -> None:

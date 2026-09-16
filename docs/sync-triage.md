@@ -29,6 +29,7 @@ uv run python scripts/sync/run_all.py --finish
 uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X)
 uv run python scripts/sync/commit_image_renames.py
 uv run python scripts/sync/commit_image_refs.py
+uv run python scripts/sync/commit_xhtml_renames.py  # xhtml rename 纯移动提交 + 捆绑修订挂起清单
 uv run python scripts/sync/commit_pure_formatting.py
 uv run python scripts/sync/commit_layout.py
 uv run python scripts/sync/triage_text.py            # 分类 + 导出审查材料；--commit 门控 + 批发提交
@@ -37,9 +38,9 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 # --finish 等价于：check_y_freshness → triage_text --commit → commit_adopted_x → report_inactive_rules
 ```
 
-图片重命名/引用/纯格式化/版式四个批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
+图片重命名/引用、xhtml rename、纯格式化/版式各批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
-`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
+`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`rename_hold.txt`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
 
 各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：commit_image_renames 无图片重命名时也会写出空 `rename_map.json`，commit_image_refs 读到空映射直接跳过。
 
@@ -155,7 +156,7 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 - opf 的 `dcterms:modified` 时间戳更新：直接视为正常同步。
 - 新增章节文件（X/Y 同时出现）：验证 Y 与 X 的文本差异能被 x2y.py 规则（含正词条目）解释 → 正常同步。
-- 两侧同步的 xhtml rename：正常同步，单独成 commit。**rename 常捆绑少量文本修订**（相似度 98~99%），采用「纯移动 + 文本分流」两步：先 `stage_content` 把 HEAD 内容写到新路径、删旧路径，提交只移动不改内容的纯 rename（全部 R100 程序化验证）；捆绑修订随即成为 M 态，随 triage_text 正常分类进审查材料、按 `fix: sync` 批发提交。**前置机械扫描**：对捆绑改动做片段级 diff，凡含需原文核实改动的文件**整对保持 R 态挂起**（rename 也不提）——rename-only 提交会把文件变成 M，triage_text 会把它当正常文本对提走，挂起即失效。
+- 两侧同步的 xhtml rename：正常同步，单独成 commit。**rename 常捆绑少量文本修订**（相似度 98~99%），由 `commit_xhtml_renames.py` 自动做「纯移动 + 文本分流」两步：干净对（无文本改动或仅剩标点/空白级片段）提交只移动不改内容的纯 rename（HEAD blob 写新路径，全部 R100 程序化验证），残留修订成为 M 态随 triage_text 正常分流；含结构改动/属性改动/语义片段的对**整对保持 R 态挂起**（rename 也不提），写入 `.triage/rename_hold.txt` 待人工对照原文核实后按性质提交。挂起的必要性：rename-only 提交会把文件变成 M，triage_text 会把它当正常文本对提走。
 - 仅 X 侧的二进制/增删/rename：X 是上游镜像，按性质单独成 commit（`--commit` 会将其列为未覆盖改动并中止，人工提交后重跑即可）。两侧同步的二进制内容替换（如插图更新）：核对两侧逐字节一致后按 `fix: sync <路径>` 单独成 commit。
 
 ## 7. 规则失活验证（commit_adopted_x → report_inactive_rules，可重跑）
