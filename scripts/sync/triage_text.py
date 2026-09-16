@@ -511,12 +511,19 @@ def main() -> None:
         return
 
     # 提交门：任何未收敛/未处理块都中止——先写规则、重跑 x2y 后再来。
+    # 挂起清单内的 rel 不计入门控（held = 不提交也不阻塞）。
+    n_susp_unheld = sum(1 for rel, ps in pairs_by_rel.items() if rel not in hold
+                        for k, _, _ in ps if k == "suspect")
+    complex_unheld = [r for r in complex_rels if r not in hold]
+    if n_susp != n_susp_unheld or len(complex_rels) != len(complex_unheld):
+        print(f"提示: 挂起 rel 不计入门控（其中含疑似 {n_susp - n_susp_unheld} 块、"
+              f"复杂 {len(complex_rels) - len(complex_unheld)} 文件）")
     problems = []
-    if n_susp:
-        problems.append(f"{n_susp} 个疑似块（见 suspect_changes.txt）")
-    if complex_rels:
-        problems.append(f"{len(complex_rels)} 个复杂文件（对齐失败）: "
-                        + "、".join(complex_rels[:5]))
+    if n_susp_unheld:
+        problems.append(f"{n_susp_unheld} 个疑似块（见 suspect_changes.txt）")
+    if complex_unheld:
+        problems.append(f"{len(complex_unheld)} 个复杂文件（对齐失败）: "
+                        + "、".join(complex_unheld[:5]))
     if problems:
         print("中止：存在未处理改动。为对应文本写 x2y 规则（校正或回钉旧文本），"
               "重跑 uv run python scripts/sync/x2y.py 后重新 --commit：")

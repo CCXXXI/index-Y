@@ -35,7 +35,7 @@
 
 1. 图片重命名（单个 commit）
 2. 图片引用更新（opf/xhtml 中的 href/src，单个 commit）
-3. xhtml rename（纯移动提交 + 捆绑修订挂起清单，commit_xhtml_renames）
+3. xhtml rename 一律纯移动提交（捆绑修订各回各管道，语义改动入挂起清单，commit_xhtml_renames）
 4. 纯格式化变更（不影响文本显示，单个 commit）
 5. 版式调整（结构/属性变化但文本不变，单个 commit）
 6. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（commit_adopted_x）→ 报告失活规则（report_inactive_rules）
