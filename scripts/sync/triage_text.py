@@ -49,15 +49,19 @@ from lib_triage import (
     frag_set,
     git,
     head_sha_map,
+    hold_path,
     modified_text_files,
     norm_ws,
+    prune_hold,
+    read_hold,
+    status_line_rel,
     text_chunks,
     triage_parser,
 )
 from x2y import fixed, fixes
 
 # .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
-MANAGED_STATE = {"rename_map.json", "rename_hold.txt", "plan.json",
+MANAGED_STATE = {"rename_map.json", "hold.txt", "plan.json",
                  "review_changes.txt", "suspect_changes.txt",
                  "adopted_rules.json"}
 
@@ -433,6 +437,11 @@ def main() -> None:
     structural_ok = r["structural_ok"]
     head, work = r["head"], r["work"]
 
+    # 挂起清单：失效条目（对应文件无在途改动）每轮自动剔除
+    for _rel in prune_hold():
+        print(f"挂起条目失效（无在途改动），剔除: {_rel}")
+    hold = read_hold()
+
     n_sync = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "sync")
     n_mixed = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "mixed")
     n_adopted = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "adopted")
@@ -494,6 +503,8 @@ def main() -> None:
         print(f"疑似上游错误: {os.path.join(STATE_DIR, 'suspect_changes.txt')}")
 
     if not do_commit:
+        if hold:
+            print(f"挂起清单 {len(hold)} 条（{hold_path()}）")
         clean_scratch()
         print("审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
               "uv run python scripts/sync/x2y.py，再带 --commit 运行")
@@ -516,8 +527,12 @@ def main() -> None:
     # 批发提交：Y == x2y(X) 由 check_y_freshness 保证（run_all.py --finish 前置），
     # 收敛改动无需块级拆分，整文件成对提交；X 侧完整接收上游原文
     # （含已写规则的缺陷文本），Y 侧为规则净化后的文本。
+    # 挂起清单（hold.txt）内的 rel 跳过提交，末尾单列报告并以非零码退出
+    #（轮次保持开放；失效条目已在上方自动剔除）。
     committed = 0
     for rel, ps in pairs_by_rel.items():
+        if rel in hold:
+            continue
         xp, yp = "X/" + rel, "Y/" + rel
         paths = [p for p in (xp, yp) if head[p] != work[p]]
         if not paths:
@@ -539,6 +554,8 @@ def main() -> None:
 
     # 新增文件（两侧同现）：fixed(X) == Y 由前置 freshness 保证，直接成对提交
     for rel in new_only:
+        if rel in hold:
+            continue
         paths = [f"{side}/{rel}" for side in ("X", "Y")
                  if os.path.exists(f"{side}/{rel}")]
         if paths:
@@ -549,9 +566,17 @@ def main() -> None:
     left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines()
             if l]
     if left:
-        print("中止：以下改动未被文本对覆盖（二进制/重命名/仅单侧增删等），"
-              "人工审查后按性质提交：")
-        print("\n".join(left[:30]))
+        other = [l for l in left if status_line_rel(l) not in hold]
+        if other:
+            print("中止：以下改动未被文本对覆盖（二进制/重命名/仅单侧增删等），"
+                  "人工审查后按性质提交：")
+            print("\n".join(other[:30]))
+            raise SystemExit(1)
+        # 仅剩挂起改动：单列报告，非零退出（轮次保持开放）
+        print(f"挂起 {len(left)} 条在途改动（{hold_path()}；原因消除后从清单删行，"
+              "重跑 --finish 即可清零）：")
+        for rel, reason in sorted(hold.items()):
+            print(f"  {rel}: {reason}")
         raise SystemExit(1)
     print(f"完成。提交 {committed} 对，工作区已清零")
     # 轮次结束：rename 映射只服务于轮内 commit_image_renames → commit_image_refs，删除以防跨轮累积

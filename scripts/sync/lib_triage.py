@@ -124,6 +124,64 @@ def staged_path_count() -> int:
     return len([p for p in git("diff", "--cached", "--name-only", "-z")
                 .decode("utf-8").split("\0") if p])
 
+# ---------- 挂起清单（.triage/hold.txt）----------
+HOLD_NAME = "hold.txt"
+
+
+def hold_path() -> str:
+    return os.path.join(repo_root(), ".triage", HOLD_NAME)
+
+
+def read_hold() -> dict[str, str]:
+    """挂起清单：rel（不带 X/、Y/ 前缀）-> 理由。# 开头为注释。"""
+    out: dict[str, str] = {}
+    if not os.path.exists(hold_path()):
+        return out
+    with open(hold_path(), encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip() or line.startswith("#"):
+                continue
+            rel, _, reason = line.partition("\t")
+            out[rel.strip()] = reason.strip() or "人工挂起"
+    return out
+
+
+def status_line_rel(line: str) -> str | None:
+    """git status --porcelain 行 → rel（去 X/、Y/ 前缀；rename 取新路径）。"""
+    p = line[3:]
+    if " -> " in p:
+        p = p.split(" -> ", 1)[1]
+    p = p.strip('"')
+    return p[2:] if p.startswith(("X/", "Y/")) else None
+
+
+def status_rels() -> dict[str, str]:
+    """工作区在途改动：rel -> 状态码（M/R/A/D/??）。"""
+    out = {}
+    for line in git("status", "--porcelain").decode("utf-8").splitlines():
+        rel = status_line_rel(line)
+        if rel is not None:
+            out[rel] = line[:2].strip()
+    return out
+
+
+def prune_hold() -> list[str]:
+    """剔除失效挂起条目（对应文件无在途改动），其余行（含注释）原样保留。"""
+    path = hold_path()
+    if not os.path.exists(path):
+        return []
+    stale = {r for r in read_hold() if r not in status_rels()}
+    if not stale:
+        return []
+    with open(path, encoding="utf-8") as f:
+        kept = [l for l in f.read().splitlines()
+                if not l.strip() or l.startswith("#")
+                or l.split("\t")[0].strip() not in stale]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(kept) + "\n")
+    return sorted(stale)
+
 
 # ---------- HTML 解析 ----------
 

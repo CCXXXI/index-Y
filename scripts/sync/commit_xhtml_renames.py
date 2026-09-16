@@ -8,7 +8,8 @@
      直接写到新路径（重建索引提交法），全部 R100 程序化验证；残留的标点级
      修订成为 M 态，随 triage_text 正常分流。
    - 挂起对（结构改动/属性改动/含语义片段）→ 整对保持 R 态（rename 也不提），
-     写入 .triage/rename_hold.txt 供人工对照原文核实后按性质提交。
+     写入挂起清单 .triage/hold.txt（rename: 前缀条目每轮重写，人工条目保留），
+     待人工对照原文核实后按性质提交。
      rename-only 提交会把文件变成 M，triage_text 会当正常文本对提走，
      故含未核实改动的文件必须整对挂起。
 2. 提交后 `git add -A` 恢复其余暂存。
@@ -30,6 +31,7 @@ from lib_triage import (
     frag_set,
     git,
     head_sha_map,
+    hold_path,
     parse_events,
     staged_renames,
     triage_parser,
@@ -72,6 +74,32 @@ def classify_pair(head: bytes, work: bytes) -> tuple[str, list[tuple[str, str]]]
     if any(is_semantic(a, b) for o, n in edits for a, b in frag_set([(o, n)])):
         return "hold:语义片段", edits
     return "clean", edits
+
+
+def update_hold(hold: dict[str, list]) -> str:
+    """rename 挂起并入挂起清单：rename: 前缀条目每轮重写，人工条目原样保留。"""
+    path = hold_path()
+    manual = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f.read().splitlines():
+                if not line.strip() or line.startswith("#"):
+                    continue
+                if not line.partition("\t")[2].startswith("rename:"):
+                    manual.append(line)
+    lines = [("# 挂起清单：triage_text --commit 跳过其中 rel 的提交并单列报告；"
+              "失效条目（对应文件无在途改动）每轮自动剔除。"),
+             ("# rename: 前缀条目由 commit_xhtml_renames 每轮重写"
+              "（其下 # 注释为改动摘要），其余为人工条目（rel<TAB>理由）。")]
+    lines += manual
+    for rel in sorted(hold):
+        verdicts = sorted({v.removeprefix("hold:") for _, v, _ in hold[rel]})
+        lines.append(f"{rel}\trename:{'、'.join(verdicts)}")
+        for _, _, edits in hold[rel]:
+            lines.extend(f"#   - {o[:80]}\n#   + {n[:80]}" for o, n in edits[:6])
+    with open(path, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(lines) + "\n")
+    return path
 
 
 def commit_pure_moves(clean: list[tuple[str, str]]) -> None:
@@ -133,14 +161,8 @@ def main() -> None:
     print(f"干净对 {len(clean)}，挂起 {len(hold_rels)} 对")
 
     os.makedirs(STATE_DIR, exist_ok=True)
-    hold_path = os.path.join(STATE_DIR, "rename_hold.txt")
-    with open(hold_path, "w", encoding="utf-8") as fp:
-        for rel in sorted(hold_rels):
-            fp.write(f"[{rel}]\n")
-            for f, verdict, edits in hold[rel]:
-                fp.write(f"  {verdict}  {f}\n")
-                fp.writelines(f"    - {o[:80]}\n    + {n[:80]}\n" for o, n in edits[:6])
-    print(f"挂起清单: {hold_path}")
+    hp = update_hold(hold)
+    print(f"挂起清单: {hp}")
 
     if dry or not clean:
         return

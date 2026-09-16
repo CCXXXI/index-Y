@@ -28,6 +28,7 @@ from lib_triage import (
     commit_paths,
     git,
     head_sha_map,
+    read_hold,
     triage_parser,
 )
 from triage_text import classify, term_summary
@@ -65,9 +66,10 @@ def main() -> None:
         json.dump(adopted_rules, f, ensure_ascii=False, indent=1)
 
     fails = committed = rk_committed = 0
+    hold = read_hold()
     for rel, ps in pairs_by_rel.items():
-        if rel in structural_ok:
-            continue  # 结构文件由 triage_text --commit 整文件成对提交
+        if rel in structural_ok or rel in hold:
+            continue  # 结构文件由 triage_text --commit 整文件成对提交；挂起文件跳过
         keep = {tuple(xb) for k, xb, _ in ps if k == "adopted" and xb}
         if not keep:
             continue
@@ -116,8 +118,8 @@ def main() -> None:
 
     # 规则失效型收敛块对：成对提交（X/Y 同块，新文本两侧逐字一致）
     for rel, ps in pairs_by_rel.items():
-        if rel in structural_ok:
-            continue  # 结构文件由 triage_text --commit 整文件成对提交
+        if rel in structural_ok or rel in hold:
+            continue  # 结构文件由 triage_text --commit 整文件成对提交；挂起文件跳过
         rk = [(tuple(xb), tuple(yb))
               for k, xb, yb in ps if k == "rulekilled" and xb and yb]
         if not rk:
