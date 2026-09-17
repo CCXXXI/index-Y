@@ -29,7 +29,7 @@ from lib_triage import repo_root, triage_parser
 
 CHUNK = 50          # 每任务块数
 SMALL = 20          # 小于此块数的文件参与合并
-JP_REPO = "../../index-jp"  # 相对仓库根的位置（AGENTS.md 约定同级目录）
+JP_REPO = "../index-jp"  # 相对仓库根的位置（AGENTS.md 约定同级目录）
 
 # 子代理提示词模板。@JP_TXT@/@JP_TXT_FIRST@/@N@ 为占位符。
 # 判定词汇与检索纪律的权威版本就在此模板内。
@@ -65,21 +65,28 @@ FINAL SUMMARY 要求：ok/suspect/unsure/unlocated 各多少；suspect/unsure/un
 
 
 def parse_blocks(triage: str) -> list[dict[str, Any]]:
-    """review_changes.txt → [{id, files, old, new}]（old/new 取 -/+ 行拼接）。"""
+    """review_changes.txt → [{id, files, old, new}]（-/+ 侧含无前缀续行）。"""
     blocks: list[dict[str, Any]] = []
     cur: dict[str, Any] | None = None
+    side: str | None = None
     with open(os.path.join(triage, "review_changes.txt"), encoding="utf-8") as f:
         for line in f:
-            m = re.match(r"^\[(\d+)次\] (.+)$", line.rstrip("\n"))
+            line = line.rstrip("\n")
+            m = re.match(r"^\[(\d+)次\] (.+)$", line)
             if m:
                 if cur:
                     blocks.append(cur)
                 cur = {"files": [x.strip() for x in m.group(2).split("、")],
                        "old": "", "new": ""}
-            elif line.startswith("- ") and cur is not None:
-                cur["old"] += line[2:].rstrip("\n")
-            elif line.startswith("+ ") and cur is not None:
-                cur["new"] += line[2:].rstrip("\n")
+                side = None
+            elif cur is not None and line.startswith("- "):
+                cur["old"] += line[2:]
+                side = "old"
+            elif cur is not None and line.startswith("+ "):
+                cur["new"] += line[2:]
+                side = "new"
+            elif cur is not None and side and line:
+                cur[side] += "\n" + line
     if cur:
         blocks.append(cur)
     for i, b in enumerate(blocks):
@@ -131,9 +138,15 @@ def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]
         if vol not in available:
             missing.append(vol)
             continue
-        xdir = os.path.join(jp_root, available[vol], "item", "xhtml")
-        lines = [f"〔{pg[:-6]}〕{page_text(os.path.join(xdir, pg))}"
-                 for pg in sorted(os.listdir(xdir))]
+        vdir = os.path.join(jp_root, available[vol])
+        xdir = next((os.path.join(vdir, sub) for sub in ("item/xhtml", "text")
+                     if os.path.isdir(os.path.join(vdir, sub))), None)
+        if xdir is None:
+            missing.append(vol)
+            continue
+        lines = [f"〔{os.path.splitext(pg)[0]}〕{page_text(os.path.join(xdir, pg))}"
+                 for pg in sorted(os.listdir(xdir))
+                 if os.path.splitext(pg)[1] in (".xhtml", ".html")]
         paths[vol] = os.path.join(out_dir, f"{vol}.txt")
         with open(paths[vol], "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
