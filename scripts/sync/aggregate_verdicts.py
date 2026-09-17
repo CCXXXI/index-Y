@@ -2,6 +2,8 @@
 
 读取 .triage/verdicts/*.jsonl 与 .triage/review_blocks.json：
 - 校验：行可解析、id 无重复、覆盖全部块（缺漏即列出，须重派或补审）
+- 核验：semantic 块的 jp 引用逐字存在于该卷 jp_text（省略号分段逐段比对，
+  防子代理编造原文证据；块所在卷无 jp_text 而 jp 非空同样报告）
 - 汇总 verdict 分布
 - 导出 verdict_suspect.json / verdict_unsure.json / verdict_unlocated.json
   （含块原文与子代理理由/jp 证据），供逐条人工复核
@@ -14,11 +16,17 @@
 
 import json
 import os
+import re
 import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import repo_root, triage_parser
+
+
+def norm_jp(s: str) -> str:
+    """归并空白并剥页码前缀〔…〕，供 jp 引用逐字子串比对。"""
+    return re.sub(r"〔[^〕]*〕|\s+", "", s)
 
 
 def main() -> int:
@@ -57,6 +65,35 @@ def main() -> int:
         print("缺 id:", missing[:50])
     for t in bad[:20]:
         print("坏行", t)
+
+    # jp 引用真实性核验（子代理可能编造原文证据）：逐条查该卷 jp_text
+    jp_cache: dict[str, str | None] = {}
+    cited = jp_bad = 0
+    for i, v in sorted(verdicts.items()):
+        jp = v.get("jp", "")
+        if not jp:
+            continue
+        cited += 1
+        vol = want[i]["files"][0].split("]")[0].strip("[")
+        if vol not in jp_cache:
+            p = os.path.join(triage, "jp_text", f"{vol}.txt")
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    jp_cache[vol] = norm_jp(f.read())
+            else:
+                jp_cache[vol] = None
+        src = jp_cache[vol]
+        if src is None:
+            bad.append(f"id {i}: 卷 {vol} 无 jp_text 而 jp 引用非空")
+            jp_bad += 1
+            continue
+        parts = [norm_jp(x) for x in re.split(r"…|\.{3}", jp) if x.strip()]
+        if any(x not in src for x in parts):
+            bad.append(f"id {i}: jp 引用不在 {vol} 原文中（疑似编造）: {jp[:60]}")
+            jp_bad += 1
+    print(f"jp 引用核验: {cited} 条, 不在原文 {jp_bad} 条")
+    for t in bad[-jp_bad:][:20] if jp_bad else []:
+        print("坏引用", t)
 
     print("verdict 分布:", dict(Counter(v["verdict"] for v in verdicts.values())))
     for kind in ("suspect", "unsure", "unlocated"):

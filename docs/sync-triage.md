@@ -188,7 +188,7 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 ```bash
 uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原文纯文本 + review_chunks/ 任务块 + review_prompts/ 提示词
 # delegate_task 每个 task_NN.md 派一个子代理（中断可安全重派）
-uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + 导出 suspect/unsure/unlocated
+uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用逐字核验 + 导出 suspect/unsure/unlocated
 ```
 
 - 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。index-jp 缺原文的卷 prepare 会列出，报用户补充后再核实。
