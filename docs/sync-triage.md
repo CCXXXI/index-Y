@@ -187,7 +187,7 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 
 ```bash
 uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原文纯文本 + review_chunks/ 任务块 + review_prompts/ 提示词
-# delegate_task 每个 task_NN.md 派一个子代理（建议并发 ≤6，中断可安全重派）
+# delegate_task 每个 task_NN.md 派一个子代理（中断可安全重派）
 uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + 导出 suspect/unsure/unlocated
 ```
 

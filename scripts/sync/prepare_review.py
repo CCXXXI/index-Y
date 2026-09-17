@@ -258,7 +258,7 @@ def main() -> int:
             f.write(prompt)
         print(f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块")
     print(f"\n提示词已写入 {os.path.relpath(prompt_dir, root)}/"
-          "（delegate_task 每任务粘贴一份，建议并发 ≤6）")
+          "（delegate_task 每任务粘贴一份）")
     frag_top(blocks)
     return 0
 
