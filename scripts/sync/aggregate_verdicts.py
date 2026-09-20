@@ -9,7 +9,7 @@
   （含块原文与子代理理由/jp 证据），供逐条人工复核
 
 注意：子代理 verdict 是自报结论，suspect/unsure/unlocated 全部、ok 抽查
-复核后才可放行或写规则（docs/sync-triage.md §6）。
+复核后才可放行或写规则（.agents/skills/sync-triage/SKILL.md §6）。
 
 用法: uv run python scripts/sync/aggregate_verdicts.py
 """

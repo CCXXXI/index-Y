@@ -380,7 +380,7 @@ def apply_blocks(old: bytes, new: bytes,
 def revert_text_chunks(old_text: str, new_text: str) -> str | None:
     """返回「新结构 + 旧文本」的中间版本；无法安全还原（文本增删/定位歧义）返回 None。
 
-    对照 docs/sync-triage.md 第 5 节：逐块对齐后把新块替换回旧块，
+    对照 .agents/skills/sync-triage/SKILL.md 第 5 节：逐块对齐后把新块替换回旧块，
     要求在文件中唯一定位。调用方需自行验证返回值与 old_text 文本块一致。
     """
     oc, nc = text_chunks(old_text.encode()), text_chunks(new_text.encode())

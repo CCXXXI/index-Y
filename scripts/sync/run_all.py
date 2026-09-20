@@ -36,7 +36,7 @@ def run(script: str, *args: str) -> None:
 def update_x(zip_path: Path) -> None:
     """上游 zip 入仓前置：工作区必须干净，否则在途审查会被新版顶掉。
 
-    跨轮残留本身是安全的（docs/sync-triage.md），此 gate 防的是白费在途
+    跨轮残留本身是安全的（.agents/skills/sync-triage/SKILL.md），此 gate 防的是白费在途
     审查与一轮混入两个上游 delta；确认要强行并入可手动跑 update_x.py。
     """
     r = subprocess.run(["git", "status", "--porcelain", "-z"],

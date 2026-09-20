@@ -1,7 +1,7 @@
 """大规模 AI 审查准备：解析审查材料 → 原文纯文本 / 任务块 / 子代理提示词。
 
 适用：triage_text 导出 .triage/review_changes.txt 后，块数多、需派子代理
-对照日文原文审查时（docs/sync-triage.md §6）。产物幂等可重跑；verdicts/
+对照日文原文审查时（.agents/skills/sync-triage/SKILL.md §6）。产物幂等可重跑；verdicts/
 内已有 .jsonl 时拒绝重建（审查在途，先聚合或人工清理，防任务块被换底）。
 
 产物（.triage/ 下）：
@@ -229,7 +229,7 @@ def main() -> int:
         print(f"原文 {vol} -> {os.path.relpath(p, root)}")
     if missing:
         print(f"警告：index-jp 缺原文卷 {missing}，相关块须报用户补充原文后核实"
-              "（docs/sync-triage.md §6 对照规则）")
+              "（.agents/skills/sync-triage/SKILL.md §6 对照规则）")
 
     groups = chunk(blocks)
     chunk_dir = os.path.join(triage, "review_chunks")

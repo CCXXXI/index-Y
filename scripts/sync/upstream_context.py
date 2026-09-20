@@ -4,7 +4,7 @@
 origin/master，不依赖其工作区状态；clone 缺失时静默跳过并清除陈旧产物）。
 记录是上游自报证据，【不免检】：本脚本只做机械层（基准
 commit 定位、片段命中检索），「引文是否真支持改动」的语义判断保留给审查者
-（docs/sync-triage.md §6 上游记录的使用纪律）。
+（.agents/skills/sync-triage/SKILL.md §6 上游记录的使用纪律）。
 
 产物（.triage/ 下）：
 - upstream_context.txt：clone 状态、逐卷基准匹配、本轮新 commit 列表

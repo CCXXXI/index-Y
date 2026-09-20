@@ -1,3 +1,8 @@
+---
+name: sync-triage
+description: "Use when 同步上游：上游 zip 更新入仓并分流提交。"
+---
+
 # 上游同步分流操作手册
 
 本文记录「新 X 入仓 + 重跑 x2y.py 后」把海量改动分流为有序 commits 的完整方法。

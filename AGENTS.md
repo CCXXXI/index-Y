@@ -8,6 +8,7 @@
 - `scripts/sync/`：同步并分流——`x2y.py`（X → Y 转换引擎，加载 `rules/` 并应用：分卷规则先于通用规则，文件内自上而下）、`update_x.py`（上游 zip 入仓）、`run_all.py` 驱动的分流流水线 + 共用库。
 - `scripts/active_rules.py`：报告范围内当前生效的 x2y 规则及首次生效点，供反馈上游。
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
+- `.agents/skills/`：任务流程 project skills（`hermes skills trust <仓库路径>` 后按需加载）。
 - `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。
 - `../index-X`（同级目录，如存在）：上游仓库的完整本地 clone，只读参考（commit 历史、`docs/maintenance-records/` 改动理由记录、`.agents/` 术语政策）；同步分流时由 `scripts/sync/upstream_context.py` 经 git plumbing 读其 origin/master，不依赖其工作区状态。
 
@@ -20,9 +21,9 @@
 
 ## 任务流程
 
-- **同步上游**（上游 zip 更新入仓并分流提交）：先读 [docs/sync-triage.md](docs/sync-triage.md) 再动手。入口：`uv run python scripts/sync/run_all.py <下载的 zip>`。
-- **阅读校对**（维护者阅读 Y 产物时记下的可疑词句）：先读 [docs/proofreading.md](docs/proofreading.md) 再动手。
+- **同步上游**（上游 zip 更新入仓并分流提交）：流程见 `.agents/skills/sync-triage/SKILL.md`。入口：`uv run python scripts/sync/run_all.py <下载的 zip>`。
+- **阅读校对**（维护者阅读 Y 产物时记下的可疑词句）：流程见 `.agents/skills/proofreading/SKILL.md`。
 
 ## 提交信息
 
-遵循 Conventional Commits；body 附最小差异摘要（`旧→新`），便于日后回溯。各任务的提交命名见对应流程文档。
+遵循 Conventional Commits；body 附最小差异摘要（`旧→新`），便于日后回溯。各任务的提交命名见对应 skill。
