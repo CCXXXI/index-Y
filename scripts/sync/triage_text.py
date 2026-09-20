@@ -63,7 +63,7 @@ from x2y import fixed, fixes
 # .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
 MANAGED_STATE = {"rename_map.json", "hold.txt", "plan.json",
                  "review_changes.txt", "suspect_changes.txt",
-                 "adopted_rules.json"}
+                 "adopted_rules.json", "upstream_context.txt"}
 
 
 def clean_scratch() -> None:

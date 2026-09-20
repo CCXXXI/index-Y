@@ -9,6 +9,7 @@
 - `scripts/active_rules.py`：报告范围内当前生效的 x2y 规则及首次生效点，供反馈上游。
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
 - `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。
+- `../index-X`（同级目录，如存在）：上游仓库的完整本地 clone，只读参考（commit 历史、`docs/maintenance-records/` 改动理由记录、`.agents/` 术语政策）；同步分流时由 `scripts/sync/upstream_context.py` 经 git plumbing 读其 origin/master，不依赖其工作区状态。
 
 不变式：**X 是上游逐字镜像，Y 是 `x2y(X)` 净化产物。**
 

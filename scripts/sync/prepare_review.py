@@ -72,6 +72,8 @@ def parse_blocks(triage: str) -> list[dict[str, Any]]:
     with open(os.path.join(triage, "review_changes.txt"), encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\n")
+            if line.startswith("★"):  # upstream_context 的预注行，非块内容
+                continue
             m = re.match(r"^\[(\d+)次\] (.+)$", line)
             if m:
                 if cur:

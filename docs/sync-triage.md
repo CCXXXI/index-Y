@@ -37,6 +37,7 @@ uv run python scripts/sync/commit_xhtml_renames.py  # xhtml rename 纯移动提�
 uv run python scripts/sync/commit_pure_formatting.py
 uv run python scripts/sync/commit_layout.py
 uv run python scripts/sync/triage_text.py            # 分类 + 导出审查材料；--commit 门控 + 批发提交
+uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + records 命中预注（--fetch 起新轮）
 uv run python scripts/sync/commit_adopted_x.py       # 导出失活规则候选（批发模型下通常无提交）
 uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不删除）
 # --finish 等价于：check_y_freshness → triage_text --commit → commit_adopted_x → report_inactive_rules
@@ -44,7 +45,7 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 
 图片重命名/引用、xhtml rename、纯格式化/版式各批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
-`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`hold.txt`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
+`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`hold.txt`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`、`upstream_context.txt`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
 
 各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：commit_image_renames 无图片重命名时也会写出空 `rename_map.json`，commit_image_refs 读到空映射直接跳过。
 
@@ -180,6 +181,22 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 - 插入块可用上下文自洽性实证：若后文存在引用该插入内容的悬空指代（旧文本中无先行词），插入即补译而非杜撰。
 
 难以判断的一律保留，宁漏勿错。
+
+### 上游记录（../index-X clone）的使用纪律
+
+同级目录 `../index-X` 的上游完整 clone 是审查参考源（仅经 git plumbing 读 origin/master，不依赖其工作区状态）。`upstream_context.py`（run_all 自动调用，起新轮带 `--fetch`）做两层机械工作：
+
+- **基准匹配**：利用 tree 哈希内容寻址定位本轮 zip 对应的上游 commit（`HEAD:X/<vol>` == 上游 `:EPUB/<vol>`，epub 解压树与上游目录逐字节一致），导出 base..master 的新 commit 列表（含 body）与范围内 maintenance-records 全文至 `.triage/upstream_context.txt`。上游 push 可能晚于 zip 发布：旧侧匹配不到时按上次同步日期近似列举、新侧不一致时标注「git 滞后于 zip」，两种情况下 commit/记录都可能不全。
+- **块级预注**：以改动点子串在全部 records 中检索，命中行以 `★` 前缀插入 review/suspect 材料块尾（prepare_review 解析时跳过）。
+
+记录（commit message 与 maintenance-records）是上游的**自报证据，不免检**。使用分四层：
+
+1. 记录描述的 `旧→新` 与实际 diff 机械一致（预注命中本身即一层佐证）；
+2. 所引日文原文真实存在——程序化 grep 核验；
+3. 引文是否真支持改动方向、统一方向裁定是否合理；
+4. 无记录覆盖的块（如整卷重译波）走原有 JP 核实路径，不变。
+
+记录的检索价值：把语义块的「开放式 JP 检索」降级为「按引文确认」；但读完 `upstream_context.txt` 与 ★ 预注后仍按「正常同步候选的正常性判断」逐块判定。
 
 ### 大规模 AI 审查（子代理流程）
 

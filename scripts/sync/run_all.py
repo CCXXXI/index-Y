@@ -86,6 +86,9 @@ def main() -> None:
     run("commit_pure_formatting.py")
     run("commit_layout.py")
     run("triage_text.py")
+    # 上游上下文（commit/记录预注）须在 triage_text 之后：预注基于其刚覆写
+    # 的审查材料；起新轮时带 --fetch，在途重跑离线复用
+    run("upstream_context.py", *(["--fetch"] if args.zip else []))
     run("commit_adopted_x.py")
     run("report_inactive_rules.py")
 
