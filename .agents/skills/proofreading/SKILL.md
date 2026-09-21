@@ -13,4 +13,8 @@ description: "Use when 阅读校对：核实维护者阅读 Y 产物时记下的
 4. 新串写终态：分卷规则先跑，产物还会被 `_common.tsv` 的通用规则改写，注意叠加后的最终形态。
 5. 重跑 `scripts/sync/x2y.py`，核验 Y 侧改动与判定逐条对应，rules/ 与 Y/ 改动同一 commit 提交。
 
+## 经验
+
+- 新串与 `_common` 正则（lookaround、删除型规则等）是否相互作用一律实测，不读正则脑补：`import` `scripts/sync/x2y.py` 的 `fixed(卷名, 候选串)` 可直接跑完整管道验证终态。
+
 提交命名 `fix: 校正 <卷标识>（N 处文本修订）`；body 附差异摘要（`旧→新`）与原文依据。
