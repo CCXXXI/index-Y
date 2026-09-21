@@ -13,6 +13,8 @@ description: "Use when 阅读校对：核实维护者阅读 Y 产物时记下的
 4. 新串写终态：分卷规则先跑，产物还会被 `_common.tsv` 的通用规则改写，注意叠加后的最终形态。
 5. 重跑 `scripts/sync/x2y.py`，核验 Y 侧改动与判定逐条对应，rules/ 与 Y/ 改动同一 commit 提交。
 
+定位与计数用 `uv run python scripts/proofreading_locate.py <卷> 关键词清单.txt`（清单 UTF-8 一行一条，TAB 后可附日文原文关键词）：一次输出 X/ 全语料计数（规则归属判定）、目标卷 X/Y 逐字上下文（供旧串截取）、原文侧命中（已剥 `<rt>` 归并空白）。
+
 ## 经验
 
 - 新串与 `_common` 正则（lookaround、删除型规则等）是否相互作用一律实测，不读正则脑补：`import` `scripts/sync/x2y.py` 的 `fixed(卷名, 候选串)` 可直接跑完整管道验证终态。
