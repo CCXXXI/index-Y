@@ -85,7 +85,7 @@
     </navPoint>
     <navPoint id="num_13" playOrder="13">
       <navLabel>
-        <text>第二章 奇术师他带来了终焉 The_7th-Egde.</text>
+        <text>第二章 魔术师他带来了终焉 The_7th-Egde.</text>
       </navLabel>
       <content src="OEBPS/Text/S1_01-03_Chapter2.xhtml"/>
       <navPoint id="num_14" playOrder="14">
