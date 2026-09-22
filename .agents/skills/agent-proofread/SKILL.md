@@ -14,11 +14,12 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 
 ## 流程
 
-### 1. 按章分派子 agent
+### 1. 切块分派子 agent
 
-- `Y/<卷>/OEBPS/Text/` 的正文文件（Prologue/ChapterN/Epilogue/Afterwords）每章一个子 agent；<6k 字符的小章合并到一个任务。包装页（Cover/Illustrations/Information 等）不读。
-- 提示词模板 `templates/chapter-agent-prompt.md`：替换 `{{VOL_PREFIX}}` 与章节路径后作 `delegate_task` 的 context/goal，模板尾部附 output_schema。一次调用并行分派全部章（S1_01：6 agent / 31 分钟 / 56 发现）。
-- 子 agent 回原文核对用 `scripts/proofreading_locate.py`（模板已内置用法）。
+- `uv run python scripts/agent_proofread/plan_chunks.py <卷>`：把整卷正文切成 ≤10 块（delegate_task 并行上限），每块 ~1.5 万字符（大卷自动加大），主区间无缝拼接、前后 ~10 行重叠上下文。包装页（Cover/Illustrations/Information 等）自动跳过。
+- 提示词模板 `templates/chapter-agent-prompt.md`：替换 `{{VOL_PREFIX}}` 后作 `delegate_task` 的 context，goal 用 plan_chunks 输出的逐块 goal 行；模板尾部附 output_schema。一次调用并行分派全部块。
+- 子 agent 回原文核对用 `scripts/proofreading_locate.py`，模板要求**批量一次跑完**（试跑教训：一词一查会让单 agent 拖到 40+ 轮）。
+- 时效目标：**单块 <15 分钟**——Kimi 上下文缓存约 20 分钟过期，超长会话失去缓存命中（S1_01 按章分派时 3.8 万字大章单 agent 跑了 30 分钟）。
 
 ### 2. 三层复核（子 agent 产出是自报，不复核不落规则）
 
@@ -39,4 +40,4 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 - 既有规则可能与新规则抢同一文本：长规则取代时用 `--replace` 删旧短规则（案例：估计大概→估计）；分卷先于通用应用，顺序即真理。
 - TSV 表头必须保留——丢表头 x2y 校验直接拒收（本流程犯过）。
 - 子 agent 自报的「读了多少字/查了多少词」不可信，以脚本验证为准。
-- 成本参考（S1_01）：11 万字符卷 56 发现、误报 <15%；子 agent 原文回查接近遇疑必查（全卷 164 词），订阅额度按百万 token/卷估。
+- 成本参考（S1_01，按章分派旧方案）：11 万字符卷 56 发现、误报 <15%、6 agent 31 分钟；子 agent 原文回查接近遇疑必查（全卷 164 词），订阅额度按百万 token/卷估。切块 + 批量查询后墙钟应压到 ~15 分钟级。
