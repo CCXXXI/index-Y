@@ -6,7 +6,9 @@
 - 中文引文逐字验证：目标卷 Y/ 对应文件 line ±3 行 raw 匹配；不匹配则剥标签
   （保留 <rt> 内容）±5 行再匹配——引文跨 ruby 标签或跨行属常见，raw 不匹配≠编造；
 - 日文依据验证：原文语料（默认 ../index-jp，--jp-root 覆盖）剥 <rt>、去标签、
-  归并空白后做子串匹配；
+  归并空白后做子串匹配；精确匹配失败再用「读音容忍」正则兜底——原文仓库部分
+  文件的读音写在 <rt> 之外（如 巫女みこさん、瞬間錬金リメン＝マグナ），兜底正则
+  允许在证据字符间插入假名/长音/＝，仅靠兜底救回的条目打 jp_flex 标记；
 - X/Y 比对：同一行 X 侧与 Y 侧剥标签文本是否一致（区分上游问题与规则引入）。
 
 只输出事实标记（quote_ok/jp_ok/x_same/found_at），不下最终判定；判定归 agent。
@@ -39,6 +41,17 @@ def norm_jp(raw: str) -> str:
     t = re.sub(r"<rt>.*?</rt>", "", raw, flags=re.DOTALL)
     t = re.sub(r"<[^>]+>", "", t)
     return html.unescape(re.sub(r"\s+", "", t))
+
+
+# 兜底正则允许插入的字符：假名、长音、＝（原文 <rt> 之外读音的书写惯例，
+# 如 巫女みこさん、量産聖槍ロンギヌス＝レプリカ、瞬間錬金リメン＝マグナ）。
+_FLEX_INS = r"[ぁ-んァ-ヶー＝]*"
+
+
+def jp_flex_ok(evidence: str, corpus: str) -> bool:
+    """证据字符间允许插入读音的容忍匹配（精确子串匹配失败后的兜底）。"""
+    pat = _FLEX_INS + _FLEX_INS.join(re.escape(c) for c in evidence) + _FLEX_INS
+    return re.search(pat, corpus) is not None
 
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
@@ -113,7 +126,10 @@ def main() -> int:
         if not f["quote_ok"]:
             bad_quote += 1
         if f.get("jp"):
-            f["jp_ok"] = norm_jp(f["jp"]) in jp if jp else None
+            needle = norm_jp(f["jp"])
+            f["jp_ok"] = (needle in jp) if jp else None
+            if f["jp_ok"] is False and jp_flex_ok(needle, jp):
+                f["jp_ok"], f["jp_flex"] = True, True
             if f["jp_ok"] is False:
                 bad_jp += 1
         else:
