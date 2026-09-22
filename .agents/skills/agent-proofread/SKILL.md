@@ -23,7 +23,7 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 
 ### 2. 三层复核（子 agent 产出是自报，不复核不落规则）
 
-1. **机械验证**：`uv run python scripts/agent_proofread/verify_findings.py <卷> findings.json`——中文引文逐字验证（剥标签容差）、日文依据语料验证、X/Y 比对。
+1. **机械验证**：把各子 agent 返回的 findings 数组合并为一个 JSON 文件（保留 file/line/quote/jp_evidence 等字段），跑 `uv run python scripts/agent_proofread/verify_findings.py <卷> findings.json`——中文引文逐字验证（剥标签容差）、日文依据语料验证、X/Y 比对。块间重叠上下文行若被多个子 agent 重复上报，按 (file, line) 去重。
 2. **X≠Y 归因**：`x_same=false` 的条目查 rules/——良性归一化（如 塑胶→塑料）按上游问题处理；**规则改坏的是规则回归**（案例：`_common` 安心感→安全感 把 X 的正确译法改错），落分卷规则压回，不回改通用规则。
 3. **人工判定**：误译高置信条目逐条回原文终判；警惕**模式性误报**——单章看似衍字、全卷实是统一体例（案例：四章标题均带人称「她/他」，单报一章即误报）。
 
@@ -38,6 +38,7 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 ## 经验
 
 - 子 agent 引文跨 ruby 标签或跨行：raw 不匹配≠编造，verify_findings 已含容差；仍不符才算编造。
+- 原文仓库部分文件的读音写在 `<rt>` 之外（如 安堵あんど）：jp_ok=False 偶属此类误报，遇此取 locator 的原文命中上下文人工核一眼，勿直接判编造。
 - 既有规则可能与新规则抢同一文本：长规则取代时用 `--replace` 删旧短规则（案例：估计大概→估计）；分卷先于通用应用，顺序即真理。
 - TSV 表头必须保留——丢表头 x2y 校验直接拒收（本流程犯过）。
 - 子 agent 自报的「读了多少字/查了多少词」不可信，以脚本验证为准。
