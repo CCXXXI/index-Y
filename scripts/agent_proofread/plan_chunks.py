@@ -1,6 +1,8 @@
 """agent 通读校对的切块方案：把整卷正文切成 ~1.5 万字符的块，供并行分派。
 
-输出每块的「文件 + 校对主区间 + 字符数」与可直接粘贴的 delegate_task goal 行。
+输出每块的「文件 + 校对主区间 + 字符数」与可直接粘贴的 delegate_task goal 行，
+末尾再印出全部块共用的 context 短指令与 output_schema——goal/context/output_schema
+三样均以本脚本输出为准直接复制，主代理不得凭记忆抄写模板（长重复 JSON 抄写会塌缩）。
 切块规则：
 - 只含正文文件（按文件名排序，内容序即顺序）；作品级包装页（Cover/Back_cover/
   Illustrations/Information/Introduction/Note/Special 等无内容序后缀）跳过；
@@ -136,6 +138,24 @@ def main() -> int:
             f"{p.path} 第 {p.start}-{p.end} 行" + ("" if p.whole else "（前后各约 10 行为重叠上下文，发现只报主区间）")
             for p in c.parts)
         print(f"     goal: 校对通读 {goal}（约 {c.chars // 1000} 千字符）")
+
+    # 全部块共用的分派参数：context 短指令（子 agent 自载模板）+ output_schema。
+    # schema 单一来源是模板【output_schema】节，此处提取后原样转印。
+    template = (ROOT / ".agents" / "skills" / "agent-proofread"
+                / "templates" / "chapter-agent-prompt.md").read_text(encoding="utf-8")
+    m = re.search(r"【output_schema】[^\n]*\n(\{.*?\})\s*$", template, flags=re.DOTALL)
+    if not m:
+        sys.exit("模板【output_schema】节提取失败，请检查模板尾部格式")
+    schema = re.sub(r"\s+", "", m.group(1))
+    vol_prefix = vol.split("]")[0]
+    print("\ncontext（全部块共用，逐字复制进每个 task）:")
+    print(f'按本仓库 .agents/skills/agent-proofread/templates/chapter-agent-prompt.md 模板执行'
+          f'（先 skill_view(name="agent-proofread", file_path="templates/chapter-agent-prompt.md") 加载）：'
+          f'模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}（含左方括号）。'
+          f'goal 给出的行区间即你的校对主区间，逐行通读；疑点回原文核对用模板规定的 proofreading_locate.py 批量清单法。'
+          f'final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。')
+    print("\noutput_schema（全部块共用，逐字复制进每个 task）:")
+    print(schema)
     return 0
 
 
