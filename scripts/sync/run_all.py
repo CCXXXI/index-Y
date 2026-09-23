@@ -1,13 +1,13 @@
 """一键跑完自动分流流程，代替按文档逐条执行各步脚本。
 
 默认（人工审查前）：check_y_freshness 前置校验 → 图片重命名/引用/纯格式化/
-版式四批提交 → triage_text 分类导出审查材料 → commit_adopted_x →
+版式四批提交 → triage_text 分类导出审查材料 → export_rule_candidates →
 report_inactive_rules。
 带 zip 时先跑 update_x.py（上游入仓）再接默认流程——要求工作区干净，
 上轮未收尾会被拒绝（在途审查会被新版顶掉）；另校验 HEAD 自洽
 （Y == x2y(X)），拦上轮改 rules/ 后漏跑 x2y.py 的陈旧 Y；在途分流中
 重跑不带 zip。
---finish（人工审查后）：triage_text --commit → commit_adopted_x →
+--finish（人工审查后）：triage_text --commit（原子提交）→
 report_inactive_rules 收尾。
 
 任一脚本失败即中止。各步骤本身幂等，可整体重跑。
@@ -67,14 +67,13 @@ def main() -> None:
                         help="上游下载的 zip；提供时先运行 update_x 起新轮")
     parser.add_argument("--finish", action="store_true",
                         help="人工审查后收尾：triage_text --commit → "
-                             "commit_adopted_x → report_inactive_rules")
+                             "report_inactive_rules")
     args = parser.parse_args()
     if args.finish:
         if args.zip is not None:
             parser.error("--finish 不接受 zip 参数")
-        run("check_y_freshness.py")  # 批发提交的不变式前提：Y == x2y(X)
+        run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
         run("triage_text.py", "--commit")
-        run("commit_adopted_x.py")
         run("report_inactive_rules.py")
         return
     if args.zip is not None:
@@ -89,7 +88,7 @@ def main() -> None:
     # 上游上下文（commit/记录预注）须在 triage_text 之后：预注基于其刚覆写
     # 的审查材料；起新轮时带 --fetch，在途重跑离线复用
     run("upstream_context.py", *(["--fetch"] if args.zip else []))
-    run("commit_adopted_x.py")
+    run("export_rule_candidates.py")
     run("report_inactive_rules.py")
 
 

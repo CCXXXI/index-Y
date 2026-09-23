@@ -1,10 +1,10 @@
-"""文本改动按【改动块】分类导出审查材料；--commit 批发提交。
+"""文本改动按【改动块】分类导出审查材料；--commit 原子提交。
 
 分流模型（X = 上游逐字镜像，Y = x2y(X) 净化产物）：
 - 审查在 rules/ 中落地：确认的上游错误写校正规则，存疑/无法修正的写
   回钉规则（新文本→旧文本），重跑 x2y.py 后 Y 即净化。
-- --commit 批发提交：check_y_freshness 保证 Y == x2y(X)，收敛的文件
-  整文件成对提交，X 侧完整接收上游原文（含已写规则的缺陷文本）。
+- --commit 原子提交：check_y_freshness 保证 Y == x2y(X)，门控通过后
+  一笔提交全部文本改动，X 侧完整接收上游原文（含已写规则的缺陷文本）。
 - 存在未收敛块（suspect）或复杂文件时 --commit 中止，必须先写规则。
 
 分类（按相对路径配对 X/<rel> 与 Y/<rel>）：
@@ -27,7 +27,7 @@
 运行两次：
 1) 默认模式：分类并导出审查材料（STATE_DIR/review_changes.txt = 正常同步候选块、
    suspect_changes.txt = 疑似上游错误块、plan.json = 逐文件块对明细）。
-2) --commit：门控通过后批发提交全部改动，工作区清零；否则中止。
+2) --commit：门控通过后一笔原子提交全部文本改动，工作区清零；否则中止。
 用法: uv run python scripts/sync/triage_text.py [--commit]
 """
 
@@ -45,7 +45,6 @@ from commit_image_renames import STATE_DIR
 from lib_triage import (
     CatFile,
     aligned_chunks,
-    commit_paths,
     frag_set,
     git,
     head_sha_map,
@@ -91,15 +90,6 @@ def term_summary(o: str, n: str, maxlen: int = 40) -> str:
             continue
         outs.append(f"{o[i1:i2][:maxlen]}→{n[j1:j2][:maxlen]}")
     return "；".join(outs)
-
-
-def group_summary(o: str, n: str, maxlen: int = 40) -> str:
-    """块/组的提交信息摘要；结构组的增删一侧为空串。"""
-    if not o:
-        return f"新增块: {n[:maxlen]}"
-    if not n:
-        return f"删除块: {o[:maxlen]}"
-    return term_summary(o, n, maxlen)
 
 
 def block_frags(o: str, n: str) -> set:
@@ -191,7 +181,7 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
     组做内容收敛验证（X 组文本应用规则后 == Y 组文本）；1:1 组逐块走块级
     分类。返回 (pairs, gate_ok, used_rules, fired_rules)。
     gate_ok = 全部块对为 sync/rulekilled——结构文件无法按块拆分提交，
-    仅在全通过时整文件成对提交，否则整文件留审。
+    仅在全通过时随原子提交整文件入仓，否则整文件留审。
     """
     xoc = [norm_ws(c) for c in text_chunks(xh)]
     xnc = [norm_ws(c) for c in text_chunks(xw)]
@@ -295,7 +285,7 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
 
 
 def classify() -> dict:
-    """对当前工作区改动做逐文件块对分类（triage_text/commit_adopted_x/report_inactive_rules 共用）。
+    """对当前工作区改动做逐文件块对分类（triage_text/export_rule_candidates 共用）。
 
     返回 {pairs_by_rel, complex, new_files, rule_use, touched_rules, head, work}：
     - pairs_by_rel[rel] = [(kind, xblock_or_None, yblock_or_None)]，
@@ -371,8 +361,8 @@ def classify() -> dict:
                  + [("*", ro, rn) for ro, rn in fixes["*"]])
         if structural:
             # 结构改动（块增删/N→M）：块组级配对分类。gate 通过（全
-            # sync/rulekilled）的文件记入 structural_ok，--commit 时整文件
-            # 成对提交；否则整文件留审（块对照常导出供审查/反馈）
+            # sync/rulekilled）的文件记入 structural_ok，--commit 时随原子
+            # 提交整文件入仓；否则整文件留审（块对照常导出供审查/反馈）
             pairs, gate, used, fired = structural_pairs(
                 vol, rules, head[xp], work[xp], head[yp], work[yp], pmap)
             for r in used:
@@ -428,14 +418,13 @@ def classify() -> dict:
 def main() -> None:
     parser = triage_parser(__doc__)
     parser.add_argument("--commit", action="store_true",
-                        help="门控通过后批发提交全部改动；默认只分类导出审查材料")
+                        help="门控通过后一笔原子提交全部文本改动；默认只分类导出审查材料")
     do_commit = parser.parse_args().commit
     r = classify()
     pairs_by_rel = r["pairs_by_rel"]
     complex_rels, new_only = r["complex"], r["new_files"]
     rule_use = r["rule_use"]
     structural_ok = r["structural_ok"]
-    head, work = r["head"], r["work"]
 
     # 挂起清单：失效条目（对应文件无在途改动）每轮自动剔除
     for _rel in prune_hold():
@@ -449,15 +438,15 @@ def main() -> None:
     n_susp = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "suspect")
     print(f"{len(pairs_by_rel):5d}  有文本改动的文件对")
     print(f"{n_sync:5d}  正常同步候选块对（待人工审查）")
-    print(f"{n_mixed:5d}  规则收敛块对（差异可被 x2y 规则解释，批发提交）")
-    print(f"{n_adopted + n_mixed:5d}  规则采纳/渲染差异块（随对批发提交）")
-    print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，随对批发提交）")
+    print(f"{n_mixed:5d}  规则收敛块对（差异可被 x2y 规则解释，随原子提交）")
+    print(f"{n_adopted + n_mixed:5d}  规则采纳/渲染差异块（随原子提交）")
+    print(f"{n_rk:5d}  规则失效型收敛块（两侧收敛，随原子提交）")
     print(f"{n_susp:5d}  疑似上游错误块对（--commit 将中止，须先写规则）")
     print(f"{len(complex_rels):5d}  复杂（对齐失败，--commit 将中止）")
     if structural_ok:
-        print(f"{len(structural_ok):5d}  结构改动文件（块组已配对收敛，批发提交）")
+        print(f"{len(structural_ok):5d}  结构改动文件（块组已配对收敛，随原子提交）")
     if new_only:
-        print(f"{len(new_only):5d}  新增文件（批发成对提交）")
+        print(f"{len(new_only):5d}  新增文件（随原子提交）")
 
     # 导出审查材料
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -531,61 +520,83 @@ def main() -> None:
             print("  -", p)
         raise SystemExit(1)
 
-    # 批发提交：Y == x2y(X) 由 check_y_freshness 保证（run_all.py --finish 前置），
-    # 收敛改动无需块级拆分，整文件成对提交；X 侧完整接收上游原文
+    # 原子提交：Y == x2y(X) 由 check_y_freshness 保证（run_all.py --finish 前置），
+    # 收敛改动无需块级/文件级拆分，一笔提交全部文本改动；X 侧完整接收上游原文
     # （含已写规则的缺陷文本），Y 侧为规则净化后的文本。
-    # 挂起清单（hold.txt）内的 rel 跳过提交，末尾单列报告并以非零码退出
-    #（轮次保持开放；失效条目已在上方自动剔除）。
-    committed = 0
-    for rel, ps in pairs_by_rel.items():
-        if rel in hold:
+    # 挂起清单（hold.txt）内的 rel 跳过提交；提交后仅剩挂起改动时单列报告并
+    # 以非零码退出（轮次保持开放；失效条目已在上方自动剔除）。
+    covered = set(pairs_by_rel) | set(new_only)
+    uncovered = []
+    for line in git("status", "--porcelain").decode("utf-8").splitlines():
+        if not line:
             continue
-        xp, yp = "X/" + rel, "Y/" + rel
-        paths = [p for p in (xp, yp) if head[p] != work[p]]
-        if not paths:
-            continue
-        if rel.lower().endswith((".opf", ".ncx")):
-            subject, body = f"chore: sync {rel}", "元数据/时间戳更新"
-        elif rel in structural_ok:
-            terms = [t for t in (group_summary(xb[0], xb[1])
-                                 for _, xb, _ in ps if xb) if t]
-            body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-            subject = f"fix: sync {rel}（{len(ps)} 处文本修订）"
-        else:
-            sel = [xb for k, xb, _ in ps if k in ("sync", "mixed") and xb]
-            terms = [t for t in (term_summary(xb[0], xb[1]) for xb in sel) if t]
-            body = "\n".join(terms[:6]) + ("\n…" if len(terms) > 6 else "")
-            subject = f"fix: sync {rel}（{len(sel)} 处文本修订）"
-        commit_paths(subject, body, paths)
-        committed += 1
+        rel = status_line_rel(line)
+        if rel is None or (rel not in covered and rel not in hold):
+            uncovered.append(line)
+    if uncovered:
+        print("中止：以下改动未被文本改动覆盖（二进制/重命名/仅单侧增删等），"
+              "人工审查按性质提交后重跑 --commit：")
+        print("\n".join(uncovered[:30]))
+        raise SystemExit(1)
 
-    # 新增文件（两侧同现）：fixed(X) == Y 由前置 freshness 保证，直接成对提交
-    for rel in new_only:
-        if rel in hold:
-            continue
-        paths = [f"{side}/{rel}" for side in ("X", "Y")
-                 if os.path.exists(f"{side}/{rel}")]
-        if paths:
-            commit_paths(f"fix: sync {rel}（新增文件）", "", paths)
-            committed += 1
+    commit_rels = sorted(covered - set(hold))
+    if commit_rels:
+        new_set = set(new_only)
+        n_blocks = sum(1 for rel in commit_rels
+                       for k, xb, _ in pairs_by_rel.get(rel, [])
+                       if k in ("sync", "mixed") and xb)
+        n_new = len([rel for rel in commit_rels if rel in new_set])
+        if n_blocks == 0 and n_new == len(commit_rels):
+            subject = f"fix: sync X/Y（新增 {n_new} 文件）"
+        elif n_blocks == 0:
+            subject = f"fix: sync X/Y（{len(commit_rels)} 文件，规则采纳/渲染）"
+        else:
+            subject = (f"fix: sync X/Y（{len(commit_rels)} 文件，"
+                       f"{n_blocks} 处文本修订）")
+        body_lines = []
+        for rel in commit_rels:
+            if rel in new_set:
+                body_lines.append(f"{rel}（新增文件）")
+                continue
+            sel = [(k, xb) for k, xb, _ in pairs_by_rel.get(rel, [])
+                   if k in ("sync", "mixed") and xb]
+            if not sel:
+                continue
+            terms = [t for t in (term_summary(xb[0], xb[1]) for _, xb in sel)
+                     if t]
+            body_lines.append(f"{rel}（{len(sel)} 处）: "
+                              + "；".join(terms[:3])
+                              + ("…" if len(terms) > 3 else ""))
+        body = "\n".join(body_lines[:40])
+        if len(body_lines) > 40:
+            body += f"\n…（共 {len(body_lines)} 文件）"
+
+        # 暂存口径 = 工作区：reset 清空在途暂存（classify 的 modified_text_files
+        # 会把挂起文件也一并暂存），再精确暂存待提交路径
+        git("reset", "-q")
+        paths = [f"{side}/{rel}" for rel in commit_rels for side in ("X", "Y")]
+        git("add", "--pathspec-from-file=-", "--pathspec-file-nul",
+            input_bytes="\0".join(paths).encode("utf-8"))
+        args = ["commit", "-q", "-m", subject]
+        if body:
+            args += ["-m", body]
+        git(*args)
 
     git("add", "-A")
     left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines()
             if l]
     if left:
-        other = [l for l in left if status_line_rel(l) not in hold]
-        if other:
-            print("中止：以下改动未被文本对覆盖（二进制/重命名/仅单侧增删等），"
-                  "人工审查后按性质提交：")
-            print("\n".join(other[:30]))
-            raise SystemExit(1)
         # 仅剩挂起改动：单列报告，非零退出（轮次保持开放）
         print(f"挂起 {len(left)} 条在途改动（{hold_path()}；原因消除后从清单删行，"
               "重跑 --finish 即可清零）：")
         for rel, reason in sorted(hold.items()):
             print(f"  {rel}: {reason}")
         raise SystemExit(1)
-    print(f"完成。提交 {committed} 对，工作区已清零")
+    if commit_rels:
+        print(f"完成。一笔原子提交 {len(commit_rels)} 个文件"
+              f"（{n_blocks} 处文本修订），工作区已清零")
+    else:
+        print("工作区已清零（无待提交文本改动）")
     # 轮次结束：rename 映射只服务于轮内 commit_image_renames → commit_image_refs，删除以防跨轮累积
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if os.path.exists(map_path):

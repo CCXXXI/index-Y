@@ -1,15 +1,15 @@
 """报告当前已失活的规则（纯报告，不删除）。
 
-候选 = STATE_DIR/adopted_rules.json（commit_adopted_x 导出：收敛用到的规则 ∪ 命中改动块
-旧文本的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」两种失效
-路径）。对每条候选：从 fixes 中移除该条后 fixed() 在【HEAD 与工作区】两侧
-X 上输出均不变 → 当前失活；否则仍生效（报告首个反例）。
+候选 = STATE_DIR/adopted_rules.json（export_rule_candidates 导出：收敛用到的规则 ∪
+命中改动块旧文本的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」
+两种失效路径）。对每条候选：从 fixes 中移除该条后 fixed() 在【HEAD 与工作区】
+两侧 X 上输出均不变 → 当前失活；否则仍生效（报告首个反例）。
 
 失活规则一律保留在 rules/ 中不删除：X 持续增长，错误类规则（如「荧幕」）
 可能在新卷内容上复发，删除会把未来的漏校正变成人工审查成本；保留的全语料
 扫描开销可忽略（每条规则约十几毫秒）。本报告仅供人工参考。
 
-验证 HEAD X 同时强制执行顺序：commit_adopted_x 未先提交时 HEAD X 仍是旧版，验证会失败
+验证 HEAD X 同时强制执行顺序：相关改动未随原子提交入仓时 HEAD X 仍是旧版，验证会失败
 （报「仍生效」）。验证工作区 X 是为了覆盖疑似上游错误块——它们留在工作区，
 可能仍命中候选规则。
 
@@ -87,7 +87,7 @@ def main() -> int:
     triage_parser(__doc__).parse_args()
     cand_path = os.path.join(STATE_DIR, "adopted_rules.json")
     if not os.path.exists(cand_path):
-        print("无候选：先运行 commit_adopted_x.py")
+        print("无候选：先运行 export_rule_candidates.py")
         return 1
     with open(cand_path, encoding="utf-8") as f:
         cands = json.load(f)

@@ -7,9 +7,9 @@
 
 - 标点/空白级或无改动 → 残留随 triage_text 正常分流；
 - 属性改动（class/href 等，文本不变）→ 版式批自动吸收（本脚本在版式批之前运行）；
-- 结构改动（文本块增删）→ triage_text 结构文件通道（收敛批发/不收敛门控中止）；
+- 结构改动（文本块增删）→ triage_text 结构文件通道（收敛随原子提交/不收敛门控中止）；
 - 语义片段 → 写入挂起清单 .triage/hold.txt（M 态挂起，triage_text --commit
-  跳过且不计入门控），待人工对照原文核实后从清单删行，随 --finish 批发提交。
+  跳过且不计入门控），待人工对照原文核实后从清单删行，随 --finish 原子提交。
 
 用法: uv run python scripts/sync/commit_xhtml_renames.py [--dry-run]
 """
