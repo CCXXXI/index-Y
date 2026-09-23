@@ -72,13 +72,13 @@ def find_contexts(text: str, needle: str, width: int = CONTEXT_CHARS) -> list[st
     return contexts
 
 
-def corpus_counts(x_dir: Path, needles: list[Needle]) -> dict[str, dict[str, int]]:
-    """单遍扫描 X/ 全语料，返回 {cn: {卷/文件: 次数}}（只保留有命中的条目）。"""
+def corpus_counts(root: Path, needles: list[Needle]) -> dict[str, dict[str, int]]:
+    """单遍扫描 root 下全语料，返回 {cn: {卷/文件: 次数}}（只保留有命中的条目）。"""
     counts: dict[str, dict[str, int]] = {n.cn: {} for n in needles}
-    files = [f for f in x_dir.rglob("*") if f.suffix in TEXT_EXT]
+    files = [f for f in root.rglob("*") if f.suffix in TEXT_EXT]
     for f in tqdm(files, desc="scan"):
         text = f.read_text(encoding="utf-8")
-        vol = f.relative_to(x_dir).parts[0]
+        vol = f.relative_to(root).parts[0]
         for n in needles:
             if c := text.count(n.cn):
                 counts[n.cn][f"{vol}/{f.name}"] = c
@@ -119,23 +119,32 @@ def main() -> None:
     p.add_argument("vol", help="目标卷（X/ 下卷目录全名或 [Sx_yy] 前缀）")
     p.add_argument("needles", type=Path, help="关键词清单文件（UTF-8）")
     p.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
+    p.add_argument("--side", choices=["both", "y"], default="both",
+                   help="both=计数与上下文含 X 侧（默认，供规则归属与旧串截取）；"
+                        "y=只给 Y 侧（agent 通读校对用：子代理证据侧是 Y+日文原文，"
+                        "X/Y 差异只会诱导误报）")
     args = p.parse_args()
 
     needles = parse_needles(args.needles)
     if not needles:
         sys.exit(f"{args.needles}: 关键词清单为空")
     vol = resolve_vol(args.vol, ROOT / "X")
-    counts = corpus_counts(ROOT / "X", needles)
+    count_root = ROOT / "X" if args.side == "both" else ROOT / "Y"
+    counts = corpus_counts(count_root, needles)
 
     for n in needles:
         print(f"===== {n.cn}")
         per_file = counts[n.cn]
         total = sum(per_file.values())
-        placement = "分卷段" if total and {k.split("/")[0] for k in per_file} == {vol} else "_common.tsv"
-        print(f"  [计数] 全语料 {total} 次 -> {placement}")
+        if args.side == "both":
+            placement = "分卷段" if total and {k.split("/")[0] for k in per_file} == {vol} else "_common.tsv"
+            print(f"  [计数] 全语料 {total} 次 -> {placement}")
+        else:
+            print(f"  [计数] Y 全语料 {total} 次")
         for k, c in per_file.items():
             print(f"         {k} x{c}")
-        for side in ("X", "Y"):
+        sides = ("X", "Y") if args.side == "both" else ("Y",)
+        for side in sides:
             for hit in vol_contexts(ROOT / side, vol, n.cn):
                 print(f"  [{side}] {hit}")
         if n.jp:
