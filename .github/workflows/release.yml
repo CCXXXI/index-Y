@@ -4,7 +4,24 @@ on:
       - "v*"
 
 jobs:
+  # 不变式 Y == x2y(X, rules) 在发布点门控：坏 tag 不产出 epub
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10
+      - run: uv run python scripts/sync/x2y.py
+      - name: Y == x2y(X, rules)
+        run: |
+          dirty=$(git status --porcelain -- Y)
+          if [ -n "$dirty" ]; then
+            echo "::error::Y/ 与 x2y(X, rules) 不一致——重跑 uv run python scripts/sync/x2y.py 并提交后重新打 tag"
+            echo "$dirty"
+            exit 1
+          fi
+
   release:
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: write
