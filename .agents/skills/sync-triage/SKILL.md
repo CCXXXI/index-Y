@@ -41,11 +41,11 @@ uv run python scripts/sync/commit_image_refs.py
 uv run python scripts/sync/commit_xhtml_renames.py  # xhtml rename 纯移动提交 + 捆绑修订挂起清单
 uv run python scripts/sync/commit_pure_formatting.py
 uv run python scripts/sync/commit_layout.py
-uv run python scripts/sync/triage_text.py            # 分类 + 导出审查材料；--commit 门控 + 批发提交
+uv run python scripts/sync/triage_text.py            # 分类 + 导出审查材料；--commit 门控 + 原子提交
 uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + records 命中预注（--fetch 起新轮）
-uv run python scripts/sync/commit_adopted_x.py       # 导出失活规则候选（批发模型下通常无提交）
+uv run python scripts/sync/export_rule_candidates.py  # 导出失活规则候选（只导出不提交）
 uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不删除）
-# --finish 等价于：check_y_freshness → triage_text --commit → commit_adopted_x → report_inactive_rules
+# --finish 等价于：check_y_freshness → triage_text --commit → report_inactive_rules
 ```
 
 图片重命名/引用、xhtml rename、纯格式化/版式各批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
@@ -58,9 +58,9 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 
 终态模型：**X 是上游逐字镜像，Y 是 `x2y(X)` 净化产物；每次分流结束工作区必须清零。**
 
-1. **正常同步**：X 和 Y 都有某项改动，且改动看起来正常 → 两边批发提交。
-2. **疑似上游错误**：确认后写成 x2y 规则（能修正写**校正规则**，存疑写**回钉规则**把该句钉回旧译文），重跑 `scripts/sync/x2y.py` 后随批发提交；X 侧照常接收上游原文，Y 侧为规则净化后的文本。
-3. **规则采纳/规则渲染差异**：两侧差异能被规则解释（上游采纳规则、规则因上游编辑获得/失去触发语境、回钉/校正规则生效）→ 随批发提交。report_inactive_rules 机械验证并报告失活规则（保留不删：X 持续增长，错误类规则可能在新内容上复发，删除会把未来的漏校正变成人工审查成本，而保留的扫描开销可忽略）。
+1. **正常同步**：X 和 Y 都有某项改动，且改动看起来正常 → 随原子提交入仓。
+2. **疑似上游错误**：确认后写成 x2y 规则（能修正写**校正规则**，存疑写**回钉规则**把该句钉回旧译文），重跑 `scripts/sync/x2y.py` 后随原子提交入仓；X 侧照常接收上游原文，Y 侧为规则净化后的文本。
+3. **规则采纳/规则渲染差异**：两侧差异能被规则解释（上游采纳规则、规则因上游编辑获得/失去触发语境、回钉/校正规则生效）→ 随原子提交入仓。report_inactive_rules 机械验证并报告失活规则（保留不删：X 持续增长，错误类规则可能在新内容上复发，删除会把未来的漏校正变成人工审查成本，而保留的扫描开销可忽略）。
 
 版式调整、文件重命名、时间戳等机械性改动一律视为正常同步，无需逐项审查。
 
@@ -73,11 +73,11 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 3. xhtml rename 一律纯移动提交（捆绑修订各回各管道，语义改动入挂起清单，commit_xhtml_renames）
 4. 纯格式化变更（不影响文本显示，单个 commit）
 5. 版式调整（结构/属性变化但文本不变，单个 commit）
-6. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（commit_adopted_x）→ 报告失活规则（report_inactive_rules）
-7. 人工审查：正常块放行；可疑块写 x2y 规则（校正或回钉）并重跑 `scripts/sync/x2y.py` → `triage_text.py --commit` 批发提交全部改动（有未处理块即中止；挂起清单 `.triage/hold.txt` 内的 rel 跳过并单列报告），再补跑 commit_adopted_x/report_inactive_rules
+6. 文本块分类导出审查材料（triage_text）→ 导出失活规则候选（export_rule_candidates）→ 报告失活规则（report_inactive_rules）
+7. 人工审查：正常块放行；可疑块写 x2y 规则（校正或回钉）并重跑 `scripts/sync/x2y.py` → `triage_text.py --commit` 一笔原子提交全部文本改动（有未处理块即中止；挂起清单 `.triage/hold.txt` 内的 rel 跳过并单列报告），再跑 report_inactive_rules
 8. 工作区清零后分流结束
 
-文本同步提交命名 `fix: sync <相对路径>（N 处文本修订）`，X 侧规则渲染差异的提交命名 `fix: sync X/<相对路径>（N 处文本修订，Y 侧规则渲染）`。
+文本同步提交命名 `fix: sync X/Y（N 文件，M 处文本修订）`（一轮一笔原子提交，body 列逐文件摘要）。
 
 ## 0. 前置校验：Y 必须与当前 X 同步
 
@@ -99,7 +99,7 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 4. `git stash pop`（同一文件内规则效果与在途改动不重叠时自动合并）；
 5. `check_y_freshness` 通过后方可继续分流；若 review 材料已生成，重跑 triage_text 重新导出（幂等）。
 
-捷径：若新规则的键在全卷 HEAD X 命中 0 次（回钉/校正上游新增文本的键天然满足），fixed(X_head) == Y_head 不变式不受影响，可不走 stash：直接重跑 x2y、确认 Y 侧 diff 均为规则效果后，规则单独成 commit，改动块随批发提交。
+捷径：若新规则的键在全卷 HEAD X 命中 0 次（回钉/校正上游新增文本的键天然满足），fixed(X_head) == Y_head 不变式不受影响，可不走 stash：直接重跑 x2y、确认 Y 侧 diff 均为规则效果后，规则单独成 commit，改动块随原子提交。
 
 ## 1. 通用 git 操作坑（本仓库路径含中文与方括号）
 
@@ -144,20 +144,20 @@ DOCTYPE 添加、`</body>\n</html>` 合并、标签间换行等不产生任何�
 按相对路径配对 `X/<rel>` 与 `Y/<rel>`（两侧目录结构相同），各自提取相对 HEAD 的文本改动（文本块级 difflib，仅接受干净的 1:1 replace），然后**以改动块为最小单位**分类：
 
 - 先把**旧 X 与旧 Y 的文本块序列做位置对齐**（1:1，允许旧 Y 被规则改写），把两侧改动配成「同位置块对」；对齐失败 → 复杂（`--commit` 中止，须人工处理）。规则的替换文本可能注入/消除带文本的标记（如 `<ruby><rt>` 注音），使 Y 侧块数与 X 不等：此类增删块在 HEAD 与工作中等量存在、不影响对齐，**HEAD 上 fixed(X) == Y 成立时容忍**（证明增删是规则产物），否则才算真复杂。必须按位置配对而不能只做全局片段集比较：同一最小片段（如 `冷气→空调`）可能一处是两侧共享改动、另一处是上游采纳规则，全局比较会把后者误判为正常同步。
-- **结构改动文件**（单侧出现块增删或 N→M 替换，如上游插入译者注/特典条目、拆分合并段落）走块组级配对：以「映射后旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组，配对组做内容收敛验证（X 组文本应用规则后 == Y 组文本），1:1 组逐块走下方块级分类。全部块对收敛（sync/rulekilled）时批发成对提交；任一疑似块 → `--commit` 中止，先写规则。
-- 逐块对比较**最小差异片段**集 F(x) 与 F(y)：F(x) == F(y) → 正常同步候选对；F(x) ⊃ F(y) 且 X 多出的片段能被 x2y.py 规则解释（收敛判定：反复应用「能严格缩小块差异」的规则后，剩余差异等于 F(y)）→ **规则收敛块对**：X 多出的片段是规则效果，随对批发提交；仅 X 有改动且收敛 → 规则采纳；Y 侧多出片段时，若 fixed 能分别从新旧 X 文本得到新旧 Y 文本（规则因上游编辑获得触发语境，如编辑引入「所以」触发 `由于→因为`），两侧差异纯属规则渲染 → 正常同步；其余（仅 Y 有改动、不收敛、HEAD 上该块两侧已有规则解释不了的不对称）→ 疑似上游错误（`--commit` 中止，须先写规则）。仅 X 有改动时除片段收敛外还认「规则管道等价」（apply_rules 后新旧 X 文本一致，上游改动整个落在规则覆盖内、fixed 后 Y 不变，覆盖 `….`→`……` 这类多步推导）为规则采纳。片段级比较是必要的：旧 Y 的同一句子可能已被 x2y 规则改过（如 `其它→其他`），块字面不同不代表改动不同。
+- **结构改动文件**（单侧出现块增删或 N→M 替换，如上游插入译者注/特典条目、拆分合并段落）走块组级配对：以「映射后旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组，配对组做内容收敛验证（X 组文本应用规则后 == Y 组文本），1:1 组逐块走下方块级分类。全部块对收敛（sync/rulekilled）时随原子提交整文件入仓；任一疑似块 → `--commit` 中止，先写规则。
+- 逐块对比较**最小差异片段**集 F(x) 与 F(y)：F(x) == F(y) → 正常同步候选对；F(x) ⊃ F(y) 且 X 多出的片段能被 x2y.py 规则解释（收敛判定：反复应用「能严格缩小块差异」的规则后，剩余差异等于 F(y)）→ **规则收敛块对**：X 多出的片段是规则效果，随原子提交；仅 X 有改动且收敛 → 规则采纳；Y 侧多出片段时，若 fixed 能分别从新旧 X 文本得到新旧 Y 文本（规则因上游编辑获得触发语境，如编辑引入「所以」触发 `由于→因为`），两侧差异纯属规则渲染 → 正常同步；其余（仅 Y 有改动、不收敛、HEAD 上该块两侧已有规则解释不了的不对称）→ 疑似上游错误（`--commit` 中止，须先写规则）。仅 X 有改动时除片段收敛外还认「规则管道等价」（apply_rules 后新旧 X 文本一致，上游改动整个落在规则覆盖内、fixed 后 Y 不变，覆盖 `….`→`……` 这类多步推导）为规则采纳。片段级比较是必要的：旧 Y 的同一句子可能已被 x2y 规则改过（如 `其它→其他`），块字面不同不代表改动不同。
 
 | 块分类 | 处理 |
 |---|---|
-| 正常同步候选（`sync`） | 逐条人工/AI 审查改动内容，正常 → 批发提交 |
-| 规则收敛（`mixed`）/ 规则采纳（`adopted`）/ 规则失效型收敛（`rulekilled`） | 两侧差异纯属规则渲染，随对批发提交 |
+| 正常同步候选（`sync`） | 逐条人工/AI 审查改动内容，正常 → 随原子提交 |
+| 规则收敛（`mixed`）/ 规则采纳（`adopted`）/ 规则失效型收敛（`rulekilled`） | 两侧差异纯属规则渲染，随原子提交 |
 | 疑似上游错误（`suspect`）/ 复杂 | `--commit` 中止：先写规则（见下） |
 
-**提交粒度为文件（批发提交）**：X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是 `x2y(X)` 净化产物；`check_y_freshness`（run_all.py `--finish` 前置）保证不变式逐文件成立，因此收敛文件整文件成对提交。每文件一个 commit（X/Y 成对），提交信息 `fix: sync <相对路径>（N 处文本修订）` 的 N 计 sync+mixed 块。存在 suspect/复杂块或未覆盖改动（二进制、rename 等）时 `--commit` 中止并列出，全部处理完后重跑——**分流结束的必要条件之一是工作区清零**。
+**提交粒度为一轮一笔（原子提交）**：X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是 `x2y(X)` 净化产物；`check_y_freshness`（run_all.py `--finish` 前置）保证不变式对全部文件成立，因此收敛改动无需块级/文件级拆分，一笔提交全部文本改动（排除挂起清单），提交信息 `fix: sync X/Y（N 文件，M 处文本修订）` 的 M 计 sync+mixed 块。存在 suspect/复杂块时 `--commit` 中止并列出，须先写规则；存在未覆盖改动（二进制、rename 等）时同样中止并列出——**覆盖核验先于提交，中止时本轮不产生任何提交**，人工按性质提交后重跑——**分流结束的必要条件之一是工作区清零**。
 
 ### 上游错误的规则化
 
-可疑块写成 x2y 规则（分卷 TSV），重跑 `x2y.py` 后 Y 即净化、块转为规则渲染差异随批发提交：
+可疑块写成 x2y 规则（分卷 TSV），重跑 `x2y.py` 后 Y 即净化、块转为规则渲染差异随原子提交入仓：
 
 - **校正规则**（缺陷文本 → 修正文本）：确认是上游错误且能给出修正时使用；有原文对照的规则在 TSV 第三列（注释列）附原文引文与理由。
 - **回钉规则**（新文本 → 旧文本）：存疑或无法给出修正时使用，把该句钉在旧译文上，Y 不含未确认文本。上游日后再改这句时规则失配失活（report_inactive_rules 报告），该句以新形态重新进入审查。
@@ -221,14 +221,14 @@ uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用�
 
 - opf 的 `dcterms:modified` 时间戳更新：直接视为正常同步。
 - 新增章节文件（X/Y 同时出现）：验证 Y 与 X 的文本差异能被 x2y.py 规则（含正词条目）解释 → 正常同步。
-- 两侧同步的 xhtml rename：正常同步，由 `commit_xhtml_renames.py` 自动处理——所有文本 rename 一律提交「只移动不改内容」的纯移动（HEAD blob 写新路径，全部 R100 程序化验证；git 按相似度配对可能跨侧错配，脚本按文件名确定性重配，歧义挂起人工），捆绑改动随文件成为 M 态后**各回各的管道**（与非 rename 改动同语义）：标点/空白级 → 随 triage_text 正常分流；属性改动 → 版式批自动吸收；结构改动 → 结构文件通道（收敛批发/不收敛门控中止）；**语义片段 → 写入挂起清单 `.triage/hold.txt`**（M 态挂起，--commit 跳过且不计入门控），核实后删行随 `--finish` 批发提交。纯移动不放行任何未核实内容（新路径 = HEAD 字节）。
+- 两侧同步的 xhtml rename：正常同步，由 `commit_xhtml_renames.py` 自动处理——所有文本 rename 一律提交「只移动不改内容」的纯移动（HEAD blob 写新路径，全部 R100 程序化验证；git 按相似度配对可能跨侧错配，脚本按文件名确定性重配，歧义挂起人工），捆绑改动随文件成为 M 态后**各回各的管道**（与非 rename 改动同语义）：标点/空白级 → 随 triage_text 正常分流；属性改动 → 版式批自动吸收；结构改动 → 结构文件通道（收敛随原子提交/不收敛门控中止）；**语义片段 → 写入挂起清单 `.triage/hold.txt`**（M 态挂起，--commit 跳过且不计入门控），核实后删行随 `--finish` 原子提交。纯移动不放行任何未核实内容（新路径 = HEAD 字节）。
 - 仅 X 侧的二进制/增删/rename：X 是上游镜像，按性质单独成 commit（`--commit` 会将其列为未覆盖改动并中止，人工提交后重跑即可）。两侧同步的二进制内容替换（如插图更新）：核对两侧逐字节一致后按 `fix: sync <路径>` 单独成 commit。
 
-## 7. 规则失活验证（commit_adopted_x → report_inactive_rules，可重跑）
+## 7. 规则失活验证（export_rule_candidates → report_inactive_rules，可重跑）
 
-规则采纳/收敛块随 triage_text 批发提交；commit_adopted_x 在分类时导出 report_inactive_rules 候选（累积制 `adopted_rules.json`：与既有候选合并，收敛用到的规则 ∪ 命中改动块旧文本的规则 ∪ 规则失效块命中的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」两种失效路径，report_inactive_rules 消费后剔除）。两者均幂等可重跑。
+规则采纳/收敛块随 triage_text 原子提交入仓；export_rule_candidates 在分类时导出 report_inactive_rules 候选（累积制 `adopted_rules.json`：与既有候选合并，收敛用到的规则 ∪ 命中改动块旧文本的规则 ∪ 规则失效块命中的规则，覆盖「上游采纳」与「上游改写源文本为第三种形式」两种失效路径，report_inactive_rules 消费后剔除）。两者均幂等可重跑。
 
-- **commit_adopted_x**：导出上述候选；X 侧仍有规则采纳/失效收敛改动未收编时按块提交（规则采纳块提交 X 侧 `fix: sync X/<rel>（N 处文本修订，Y 侧规则渲染）`，规则失效型收敛块成对提交）。支持 `--dry-run`。
+- **export_rule_candidates**：导出上述候选（只导出不提交；原子模型下无块级拆分需求）。
 - **report_inactive_rules**：逐条机械验证候选规则是否失活——从管道移除该条后 fixed() 在
   **HEAD 与工作区**的 X 上输出均不变 → 当前失活，报告；否则报告首个
   反例（规则仍在他处生效）。失活规则保留在 rules/ 中不删除：X 持续增长，
@@ -240,6 +240,6 @@ uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用�
 
 ## 8. 每批提交后的收尾
 
-triage_text `--commit` 先批发提交全部文本对（**跳过挂起清单 `.triage/hold.txt` 中的 rel**），末尾再 `git add -A` 并核验工作区：清单外有未覆盖改动（二进制/rename/仅单侧增删等）即列出并以非零码中止——**文本对提交先于核验，列出项不影响已提交部分**，人工按性质提交后重跑 `--finish`；仅剩清单内改动时单列「挂起」报告并以非零码退出（轮次保持开放，下一轮带 zip 入仓仍被 update_x 拒绝）。核实完成后从清单删行重跑 `--finish`，直至输出「工作区已清零」。
+triage_text `--commit` 先做覆盖核验：工作区改动未被文本改动覆盖（二进制/rename/仅单侧增删等）即列出并以非零码中止——**核验先于提交，中止时本轮不产生任何提交**，人工按性质提交后重跑 `--finish`。核验通过后一笔原子提交全部文本改动（**跳过挂起清单 `.triage/hold.txt` 中的 rel**）；仅剩清单内改动时单列「挂起」报告并以非零码退出（轮次保持开放，下一轮带 zip 入仓仍被 update_x 拒绝）。核实完成后从清单删行重跑 `--finish`，直至输出「工作区已清零」。
 
 挂起清单每行 `相对路径（不带 X/、Y/ 前缀）<TAB>理由`，`#` 开头为注释；失效条目（对应文件已无在途改动）每轮自动剔除。`rename:` 前缀条目由 commit_xhtml_renames 生成，其余为人工条目。清单内 rel 同时不计入提交门（suspect/complex）——held = 不提交也不阻塞。
