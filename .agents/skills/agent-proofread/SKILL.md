@@ -5,7 +5,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 
 # agent 通读校对
 
-proofreading 的前移：发现环节从「维护者阅读时记下」换成「子 agent 按块通读」，判定口径与规则落地不变。**开工选卷先查 `status.md`（各卷 AI 校对状态），优先上游与本项目都未校对的卷**；上游已全卷校对的只有创约 1/2/3（以 index-X git log「重新校对」提交为准，见 status.md 刷新口径），其余卷均未通校。
+proofreading 的前移：发现环节从「维护者阅读时记下」换成「子 agent 按块通读」，判定口径与规则落地不变。**开工选卷先查 `status.md`（各卷 AI 校对状态；文件在本 skill 目录下，即 `.agents/skills/agent-proofread/status.md`，不在仓库根），优先上游与本项目都未校对的卷**；上游已全卷校对的只有创约 1/2/3（以 index-X git log「重新校对」提交为准，见 status.md 刷新口径），其余卷均未通校。
 
 ## 判定依据（指针，不复制进本仓库）
 
@@ -33,7 +33,7 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 - `uv run python scripts/agent_proofread/apply_rules.py <卷> candidates.tsv [--replace 旧串]...`：归属计数（全语料命中须全在本卷，否则报错交人裁决）、正则守卫、双模拟，全过才写 TSV。
 - 重跑 `uv run python scripts/sync/x2y.py`，`--verify-y` 终验；`git diff` 应为纯行内替换（+N/−N 相等）。
 - rules/ 与 Y/ 同一 commit：`fix: 校正 <卷标识>（N 处文本修订）`，body 附全量 `旧→新`。
-- **登记 `status.md`**：更新该卷「本项目」列为日期（提交号，修订处数），随本批改动一起提交。
+- **登记 `status.md`**（本 skill 目录下同名文件）：更新该卷「本项目」列为日期（提交号，修订处数），随本批改动一起提交。
 
 ## 经验
 
