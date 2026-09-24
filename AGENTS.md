@@ -19,7 +19,7 @@
 ## 脚本开发
 
 - 功能优先调用成熟库实现（如 argparse 解析命令行、colorama 输出颜色），不手写等价逻辑（如自行解析 sys.argv、拼 ANSI 转义序列）。
-- 新增或修改 `scripts/` 后，提交前必须跑通 `uv run ruff check .` 与 `uv run ty check .`（零报告才算通过）。
+- 增改 `scripts/` 后，提交前须跑 `uv run ruff format` `uv run ruff check` `uv run ty check`。
 
 ## 任务流程
 
