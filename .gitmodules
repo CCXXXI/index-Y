@@ -1,0 +1,4 @@
+[submodule "index-X"]
+	path = index-X
+	url = https://github.com/1204244136/index-X
+	ignore = untracked

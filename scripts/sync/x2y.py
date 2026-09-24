@@ -25,6 +25,8 @@ RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 HEADER = "旧\t新\t注释"
 
+ensure_x()  # preflight：load_rule_records 列 X/ 卷目录，联接须先存在
+
 
 def load_rule_records() -> list[dict]:
     """加载 rules/*.tsv 为规则记录（含出处行号）并校验；异常直接报错退出。"""
