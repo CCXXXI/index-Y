@@ -186,7 +186,8 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
     以「映射后的旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组，配对的
     组做内容收敛验证（X 组文本应用规则后 == Y 组文本）；1:1 组逐块走块级
     分类。返回 (pairs, gate_ok, used_rules, fired_rules)。
-    gate_ok = 全部块对为 sync/rulekilled——结构文件无法按块拆分提交，
+    gate_ok = 全部块对收敛——sync/rulekilled/adopted（规则采纳是机器证明的
+    收敛，无需审查）——结构文件无法按块拆分提交，
     仅在全通过时随原子提交整文件入仓，否则整文件留审。
     """
     xoc = [norm_ws(c) for c in text_chunks(xh)]
@@ -198,8 +199,12 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
     yops = [op for op in difflib.SequenceMatcher(a=yoc, b=ync, autojunk=False)
             .get_opcodes() if op[0] != "equal"]
     y_by_key = defaultdict(list)
+    y1v1_at = {}  # 旧 Y 块索引 → 1:1 replace 组（整组未配对时的回落配对）
     for t, i1, i2, j1, j2 in yops:
         y_by_key[(i1, t, i2 - i1, j2 - j1)].append((t, i1, i2, j1, j2))
+        if t == "replace" and i2 - i1 == 1 and j2 - j1 == 1:
+            y1v1_at[i1] = (t, i1, i2, j1, j2)
+    consumed_y: set[int] = set()  # 已被回落配对消费的 Y 组（旧 Y 起始索引）
 
     pairs, gate = [], True
     used_rules, fired_rules = [], []
@@ -214,17 +219,34 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
         key = (a, t, i2 - i1, j2 - j1)
         xo_s, xn_s = "\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])
         if key not in y_by_key:
-            # X 侧独有组：1:1 逐块判定规则采纳；结构组 → 疑似
-            gate = False
             if t == "replace" and (i2 - i1) == (j2 - j1):
+                # 整组未配对时逐块回落：回钉/校正规则会改变 Y 侧同位置组形
+                # （如 2:2 → 1:1），按锚点配 1:1 Y 组走块级分类；配不上的块
+                # 再走规则采纳判定
                 for k in range(i2 - i1):
                     xo, xn = xoc[i1 + k], xnc[j1 + k]
-                    used: list = []
-                    kind = xonly_kind(vol, xo, xn, used)
-                    used_rules += used
+                    ak = pmap.get(i1 + k)
+                    yg = y1v1_at.get(ak) if ak is not None else None
+                    if yg is not None and yg[1] not in consumed_y:
+                        consumed_y.add(yg[1])
+                        _, yi1, _, yj1, _ = yg
+                        kind, used, fired = classify_block(
+                            vol, rules, xo, xn, yoc[yi1], ync[yj1])
+                        used_rules += used
+                        fired_rules += fired
+                        pairs.append((kind, (xo, xn), (yoc[yi1], ync[yj1])))
+                        if kind not in ("sync", "rulekilled"):
+                            gate = False
+                        continue
+                    used2: list = []
+                    kind = xonly_kind(vol, xo, xn, used2)
+                    used_rules += used2
                     pairs.append((kind, (xo, xn), None))
-            else:
-                pairs.append(("suspect", (xo_s, xn_s), None))
+                    if kind == "suspect":
+                        gate = False
+                continue
+            pairs.append(("suspect", (xo_s, xn_s), None))
+            gate = False
             continue
         _, yi1, yi2, yj1, yj2 = y_by_key[key].pop(0)
         yo_s, yn_s = "\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2])
@@ -246,7 +268,10 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
             if kind not in ("sync", "rulekilled"):
                 gate = False
     for ops in y_by_key.values():  # Y 侧未配对组 → 疑似
-        for t, yi1, yi2, yj1, yj2 in ops:
+        for op in ops:
+            if op[1] in consumed_y:
+                continue
+            t, yi1, yi2, yj1, yj2 = op
             pairs.append(("suspect", None,
                           ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2]))))
             gate = False
