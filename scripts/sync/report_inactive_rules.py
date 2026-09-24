@@ -44,8 +44,7 @@ def differs_without(vol: str, content: str, skip: tuple) -> bool:
     （排除后缀规则再收敛的情形）。
     """
     sec, ro, rn = skip
-    seq = ([(vol, *t) for t in fixes.get(vol, [])]
-           + [("*", *t) for t in fixes["*"]])
+    seq = [(vol, *t) for t in fixes.get(vol, [])] + [("*", *t) for t in fixes["*"]]
     skipped = fired = False
     out = content
     for s, o, n in seq:
@@ -72,8 +71,7 @@ def x_text_files():
         for dirpath, _, files in os.walk(vdir):
             for name in files:
                 if name.lower().endswith(TEXT_EXT):
-                    rels.append(os.path.relpath(
-                        os.path.join(dirpath, name), xdir))
+                    rels.append(os.path.relpath(os.path.join(dirpath, name), xdir))
         out[vol] = rels
     return out
 
@@ -113,20 +111,19 @@ def main() -> int:
                 sha = hm.get("X/" + rel.replace(os.sep, "/"))
                 if sha:
                     contents.append(cf.read(sha).decode("utf-8"))
-                if any(differs_without(vol, cnt, key)
-                       for cnt in contents):
+                if any(differs_without(vol, cnt, key) for cnt in contents):
                     counter = rel
                     break
             if counter:
                 break
-        (active if counter else inactive).append(
-            (c, counter) if counter else c)
+        (active if counter else inactive).append((c, counter) if counter else c)
     cf.close()
 
     print(f"{len(inactive):3d} 条当前失活（上游已收敛；保留不删，仅供参考）")
     for c in inactive:
-        print(f"    [{c['section']}] {c['old']} -> {c['new']}"
-              f"（{len(c['rels'])} 处采纳）")
+        print(
+            f"    [{c['section']}] {c['old']} -> {c['new']}（{len(c['rels'])} 处采纳）"
+        )
     if active:
         print(f"{len(active):3d} 条仍生效（首个反例）：")
         for c, rel in active:
@@ -137,11 +134,10 @@ def main() -> int:
             print(f"    [{c['section']}] {c['old']} -> {c['new']}")
 
     # 累积制候选的消费剔除：已失活与已缺失的移出 json，仍生效的保留
-    consumed = {(c["section"], c["old"], c["new"])
-                for c in inactive} | {(c["section"], c["old"], c["new"])
-                                      for c in missing}
-    left = [c for c in cands
-            if (c["section"], c["old"], c["new"]) not in consumed]
+    consumed = {(c["section"], c["old"], c["new"]) for c in inactive} | {
+        (c["section"], c["old"], c["new"]) for c in missing
+    }
+    left = [c for c in cands if (c["section"], c["old"], c["new"]) not in consumed]
     with open(cand_path, "w", encoding="utf-8") as f:
         json.dump(left, f, ensure_ascii=False, indent=1)
     return 0

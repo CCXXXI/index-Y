@@ -43,8 +43,7 @@ def pick_volume(arg: str) -> str:
 
 def pick_files(vol: str, chap: str | None) -> list[Path]:
     base = X_DIR / vol
-    files = sorted(p for p in base.rglob("*")
-                   if p.is_file() and p.suffix in TEXT_EXT)
+    files = sorted(p for p in base.rglob("*") if p.is_file() and p.suffix in TEXT_EXT)
     if chap is None:
         return files
     hits = [p for p in files if chap in p.relative_to(base).as_posix()]
@@ -82,14 +81,15 @@ def trace_pos(original: str, seq: list[dict], i: int, pos: int) -> int | None:
     return pos
 
 
-def first_point(vol: str, fidx: int, path: Path,
-                original: str, pre: str, m, seq: list[dict], i: int) -> dict:
+def first_point(
+    vol: str, fidx: int, path: Path, original: str, pre: str, m, seq: list[dict], i: int
+) -> dict:
     """定位首个匹配：回溯到 X 原文位置；匹配文本本身是前置规则的产物时
     （落入被前置规则改写的区间），退化为规则应用时文本中的位置并加注。"""
     rel = path.relative_to(X_DIR / vol).as_posix()
     matched = m.group(0)
     s = trace_pos(original, seq, i, m.start())
-    if s is None or original[s:s + len(matched)] != matched:
+    if s is None or original[s : s + len(matched)] != matched:
         base, s, note = pre, m.start(), "（位置为规则应用时文本，已被前置规则改写）"
     else:
         base, note = original, ""
@@ -97,10 +97,18 @@ def first_point(vol: str, fidx: int, path: Path,
     line = base.count("\n", 0, s) + 1
     w = 30
     a, b = max(0, s - w), min(len(base), e + w)
-    snip = re.sub(r"\s+", " ", f"{base[a:s]}{Fore.RED}{Style.BRIGHT}{matched}"
-                               f"{Style.RESET_ALL}{base[e:b]}")
-    return {"fidx": fidx, "rel": rel, "line": line,
-            "snip": "…" + snip.strip() + "…", "note": note}
+    snip = re.sub(
+        r"\s+",
+        " ",
+        f"{base[a:s]}{Fore.RED}{Style.BRIGHT}{matched}{Style.RESET_ALL}{base[e:b]}",
+    )
+    return {
+        "fidx": fidx,
+        "rel": rel,
+        "line": line,
+        "snip": "…" + snip.strip() + "…",
+        "note": note,
+    }
 
 
 def scan(vol: str, files: list[Path], seq: list[dict]) -> dict:
@@ -116,29 +124,43 @@ def scan(vol: str, files: list[Path], seq: list[dict]) -> dict:
             content = out
         for i, pre in pending.items():  # 移除该规则后最终输出是否改变
             out = pre
-            for r in seq[i + 1:]:
+            for r in seq[i + 1 :]:
                 out = re.sub(r["old"], r["new"], out)
             if out != content:
-                active[i] = first_point(vol, fidx, path, original, pre,
-                                        re.search(seq[i]["old"], pre), seq, i)
+                active[i] = first_point(
+                    vol,
+                    fidx,
+                    path,
+                    original,
+                    pre,
+                    re.search(seq[i]["old"], pre),
+                    seq,
+                    i,
+                )
     return active
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("volume", metavar="卷",
-                        help="X/ 下卷目录名或其唯一子串（如 S4_01）")
-    parser.add_argument("chapter", metavar="章节", nargs="?",
-                        help="卷内文本文件相对路径的子串（如 Chapter1 或 "
-                             "S4_01-04）；匹配到多个文件时全部纳入范围")
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "volume", metavar="卷", help="X/ 下卷目录名或其唯一子串（如 S4_01）"
+    )
+    parser.add_argument(
+        "chapter",
+        metavar="章节",
+        nargs="?",
+        help="卷内文本文件相对路径的子串（如 Chapter1 或 "
+        "S4_01-04）；匹配到多个文件时全部纳入范围",
+    )
     args = parser.parse_args()
     vol = pick_volume(args.volume)
     files = pick_files(vol, args.chapter)
     rules = load_rule_records()
-    seq = ([r for r in rules if r["section"] == vol]
-           + [r for r in rules if r["section"] == "*"])
+    seq = [r for r in rules if r["section"] == vol] + [
+        r for r in rules if r["section"] == "*"
+    ]
     active = scan(vol, files, seq)
 
     head = f"范围：X/{vol}"
@@ -150,23 +172,29 @@ def main() -> int:
     if not active:
         print("范围内无生效规则。")
         return 0
-    ordered = sorted(active, key=lambda i: (active[i]["fidx"],
-                                            active[i]["line"], i))
+    ordered = sorted(active, key=lambda i: (active[i]["fidx"], active[i]["line"], i))
     n_vol = sum(1 for i in ordered if seq[i]["section"] == vol)
-    print(f"{Style.BRIGHT}"
-          f"生效规则 {len(ordered)} 条"
-          f"（分卷段 {n_vol} · 通用段 {len(ordered) - n_vol}），"
-          f"按首次生效点排序：{Style.RESET_ALL}\n")
+    print(
+        f"{Style.BRIGHT}"
+        f"生效规则 {len(ordered)} 条"
+        f"（分卷段 {n_vol} · 通用段 {len(ordered) - n_vol}），"
+        f"按首次生效点排序：{Style.RESET_ALL}\n"
+    )
     for i in ordered:
         r, p = seq[i], active[i]
-        sec, sec_color = (("分卷", Fore.CYAN) if r["section"] == vol
-                          else ("通用", Fore.MAGENTA))
+        sec, sec_color = (
+            ("分卷", Fore.CYAN) if r["section"] == vol else ("通用", Fore.MAGENTA)
+        )
         new = r["new"] if r["new"] else "（删除）"
-        print(f"{sec_color}[{sec}:{r['lineno']}]{Style.RESET_ALL} "
-              f"{Fore.RED}{r['old']}{Style.RESET_ALL} -> "
-              f"{Fore.GREEN}{new}{Style.RESET_ALL}")
-        print(f"  首次生效 {Fore.CYAN}{p['rel']}:{p['line']}{Style.RESET_ALL}"
-              f"{Fore.YELLOW}{p['note']}{Style.RESET_ALL}")
+        print(
+            f"{sec_color}[{sec}:{r['lineno']}]{Style.RESET_ALL} "
+            f"{Fore.RED}{r['old']}{Style.RESET_ALL} -> "
+            f"{Fore.GREEN}{new}{Style.RESET_ALL}"
+        )
+        print(
+            f"  首次生效 {Fore.CYAN}{p['rel']}:{p['line']}{Style.RESET_ALL}"
+            f"{Fore.YELLOW}{p['note']}{Style.RESET_ALL}"
+        )
         print(f"  {p['snip']}")
     return 0
 

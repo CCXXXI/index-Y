@@ -24,24 +24,35 @@ TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
 
 def repo_root() -> str:
-    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                       capture_output=True, env=ENV, check=True)
+    r = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        env=ENV,
+        check=True,
+    )
     return r.stdout.decode().strip()
 
 
 def triage_parser(description: str) -> argparse.ArgumentParser:
     """分流脚本统一的命令行解析器：-h 原样展示模块 docstring。"""
     return argparse.ArgumentParser(
-        description=description,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
 
 
 def git(*args: str, input_bytes: bytes | None = None) -> bytes:
-    r = subprocess.run(["git", *args], cwd=repo_root(), input=input_bytes,
-                       capture_output=True, env=ENV, check=False)
+    r = subprocess.run(
+        ["git", *args],
+        cwd=repo_root(),
+        input=input_bytes,
+        capture_output=True,
+        env=ENV,
+        check=False,
+    )
     if r.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)}: "
-                           f"{r.stderr.decode('utf-8', 'replace')[:500]}")
+        raise RuntimeError(
+            f"git {' '.join(args)}: {r.stderr.decode('utf-8', 'replace')[:500]}"
+        )
     return r.stdout
 
 
@@ -49,15 +60,21 @@ def modified_text_files() -> list[str]:
     """统一从「全部暂存」状态出发，返回修改的文本文件路径（不含 rename）。"""
     git("add", "-A")
     entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
-    return [e[3:] for e in entries
-            if e and e[0] == "M" and not e.startswith("R")
-            and e[3:].lower().endswith(TEXT_EXT)]
+    return [
+        e[3:]
+        for e in entries
+        if e
+        and e[0] == "M"
+        and not e.startswith("R")
+        and e[3:].lower().endswith(TEXT_EXT)
+    ]
 
 
 def staged_renames() -> list[tuple[str, str]]:
     """暂存的 rename 对，返回 (from, to)。"""
-    out = git("diff", "--cached", "--name-status", "-z", "-M",
-              "--diff-filter=R").decode("utf-8")
+    out = git(
+        "diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=R"
+    ).decode("utf-8")
     parts = [p for p in out.split("\0") if p]
     pairs = []
     i = 0
@@ -85,9 +102,13 @@ class CatFile:
     """持久的 git cat-file --batch 读取器；比逐文件 git show 快一个量级。"""
 
     def __init__(self) -> None:
-        self.p = subprocess.Popen(["git", "cat-file", "--batch"],
-                                  cwd=repo_root(), env=ENV,
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.p = subprocess.Popen(
+            ["git", "cat-file", "--batch"],
+            cwd=repo_root(),
+            env=ENV,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
         pin, pout = self.p.stdin, self.p.stdout
         assert pin is not None and pout is not None  # PIPE 已指定
         self._in, self._out = pin, pout
@@ -121,8 +142,16 @@ def commit_paths(subject: str, body: str, paths: list[str]) -> None:
 
 
 def staged_path_count() -> int:
-    return len([p for p in git("diff", "--cached", "--name-only", "-z")
-                .decode("utf-8").split("\0") if p])
+    return len(
+        [
+            p
+            for p in git("diff", "--cached", "--name-only", "-z")
+            .decode("utf-8")
+            .split("\0")
+            if p
+        ]
+    )
+
 
 # ---------- 挂起清单（.triage/hold.txt）----------
 HOLD_NAME = "hold.txt"
@@ -175,9 +204,13 @@ def prune_hold() -> list[str]:
     if not stale:
         return []
     with open(path, encoding="utf-8") as f:
-        kept = [l for l in f.read().splitlines()
-                if not l.strip() or l.startswith("#")
-                or l.split("\t")[0].strip() not in stale]
+        kept = [
+            l
+            for l in f.read().splitlines()
+            if not l.strip()
+            or l.startswith("#")
+            or l.split("\t")[0].strip() not in stale
+        ]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(kept) + "\n")
     return sorted(stale)
@@ -259,13 +292,17 @@ def is_pure_formatting(old: bytes, new: bytes) -> bool:
         return False
 
     def filt(s):
-        return [e for i, e in enumerate(s)
-                if not (e == ("p",) and i + 1 < len(s) and s[i + 1][0] == "img")]
+        return [
+            e
+            for i, e in enumerate(s)
+            if not (e == ("p",) and i + 1 < len(s) and s[i + 1][0] == "img")
+        ]
 
     return filt(os_) == filt(ns)
 
 
 # ---------- 文本改动提取（块级 + 片段级） ----------
+
 
 def chunk_changes(old: bytes, new: bytes) -> list[tuple[str, str]] | None:
     """对齐两侧文本块，返回 1:1 replace 的 (旧, 新) 列表；有增删则返回 None。"""
@@ -295,9 +332,11 @@ def frag_set(changes: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 def raw_variants(chunk: str) -> list[str]:
     """文本块在文件中的可能原始形态（实体编码变体）。"""
-    return [chunk,
-            chunk.replace("&", "&amp;"),
-            chunk.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")]
+    return [
+        chunk,
+        chunk.replace("&", "&amp;"),
+        chunk.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+    ]
 
 
 def aligned_chunks(old: bytes, new: bytes):
@@ -325,9 +364,9 @@ def apply_frags(o: str, n: str, keep_frags: set[tuple[str, str]]) -> str:
     return "".join(out)
 
 
-def apply_blocks(old: bytes, new: bytes,
-                 keep: set[tuple[str, str]],
-                 partial: dict | None = None) -> str | None:
+def apply_blocks(
+    old: bytes, new: bytes, keep: set[tuple[str, str]], partial: dict | None = None
+) -> str | None:
     """「new 内容，但把不在 keep 中的改动还原」的中间版本。
 
     keep 为 norm_ws 的 (旧块, 新块) 集合（chunk_changes 的元素），整块保留。
@@ -350,8 +389,7 @@ def apply_blocks(old: bytes, new: bytes,
             if key in keep:
                 continue
             nvs = raw_variants(nc[nj])
-            hit = next((k for k, v in enumerate(nvs) if staged.count(v) == 1),
-                       None)
+            hit = next((k for k, v in enumerate(nvs) if staged.count(v) == 1), None)
             if hit is None:
                 return None
             if key in partial:
@@ -360,8 +398,9 @@ def apply_blocks(old: bytes, new: bytes,
                 s, ok = nvs[hit], True
                 for a, b in partial[key]:
                     bvs, avs = raw_variants(b), raw_variants(a)
-                    k = next((i for i, v in enumerate(bvs)
-                              if v and s.count(v) == 1), None)
+                    k = next(
+                        (i for i, v in enumerate(bvs) if v and s.count(v) == 1), None
+                    )
                     if k is None:
                         ok = False
                         break
@@ -369,8 +408,7 @@ def apply_blocks(old: bytes, new: bytes,
                 if ok:
                     staged = staged.replace(nvs[hit], s, 1)
                 else:
-                    staged = staged.replace(nvs[hit],
-                                            raw_variants(oc[oi])[hit], 1)
+                    staged = staged.replace(nvs[hit], raw_variants(oc[oi])[hit], 1)
             else:
                 ovs = raw_variants(oc[oi])
                 staged = staged.replace(nvs[hit], ovs[hit], 1)

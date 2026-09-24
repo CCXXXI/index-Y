@@ -60,9 +60,15 @@ from lib_triage import (
 from x2y import fixed, fixes
 
 # .triage 中脚本自管的状态文件；其余（ai_review_*、verdict 等）是审查草稿。
-MANAGED_STATE = {"rename_map.json", "hold.txt", "plan.json",
-                 "review_changes.txt", "suspect_changes.txt",
-                 "adopted_rules.json", "upstream_context.txt"}
+MANAGED_STATE = {
+    "rename_map.json",
+    "hold.txt",
+    "plan.json",
+    "review_changes.txt",
+    "suspect_changes.txt",
+    "adopted_rules.json",
+    "upstream_context.txt",
+}
 
 
 # 审查草稿目录（prepare_review 的产物），随新一轮导出整体轮转
@@ -73,11 +79,14 @@ def clean_scratch() -> None:
     """默认模式导出新材料 = 新一轮审查开始：把上轮审查草稿（散文件 +
     REVIEW_DIRS 目录）轮转入 prev/（仅保留一轮），防止旧 verdict 被误当
     本轮结论。--commit 模式不清：中止时审查仍在继续，草稿还有用。"""
-    scratch = [f for f in os.listdir(STATE_DIR)
-               if f not in MANAGED_STATE and f != "prev"
-               and os.path.isfile(os.path.join(STATE_DIR, f))]
-    dirs = [d for d in REVIEW_DIRS
-            if os.path.isdir(os.path.join(STATE_DIR, d))]
+    scratch = [
+        f
+        for f in os.listdir(STATE_DIR)
+        if f not in MANAGED_STATE
+        and f != "prev"
+        and os.path.isfile(os.path.join(STATE_DIR, f))
+    ]
+    dirs = [d for d in REVIEW_DIRS if os.path.isdir(os.path.join(STATE_DIR, d))]
     if not scratch and not dirs:
         return
     prev = os.path.join(STATE_DIR, "prev")
@@ -154,8 +163,7 @@ def positional_map(xhead: bytes, yhead: bytes, vol: str | None = None):
     return m
 
 
-def classify_block(vol: str, rules: list, xo: str, xn: str,
-                   yo: str, yn: str):
+def classify_block(vol: str, rules: list, xo: str, xn: str, yo: str, yn: str):
     """1:1 块对分类。返回 (kind, used, fired)：
     used = 收敛判定用到的规则；fired = rulekilled 块命中旧文本的规则。"""
     fx, fy = block_frags(xo, xn), block_frags(yo, yn)
@@ -179,8 +187,9 @@ def classify_block(vol: str, rules: list, xo: str, xn: str,
     return "suspect", [], []
 
 
-def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
-                     yh: bytes, yw: bytes, pmap: dict):
+def structural_pairs(
+    vol: str, rules: list, xh: bytes, xw: bytes, yh: bytes, yw: bytes, pmap: dict
+):
     """结构改动文件（块增删 / N→M 替换）的块组级配对分类。
 
     以「映射后的旧块锚点 + 操作类型 + 组长度」配对两侧 difflib 组，配对的
@@ -194,10 +203,16 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
     xnc = [norm_ws(c) for c in text_chunks(xw)]
     yoc = [norm_ws(c) for c in text_chunks(yh)]
     ync = [norm_ws(c) for c in text_chunks(yw)]
-    xops = [op for op in difflib.SequenceMatcher(a=xoc, b=xnc, autojunk=False)
-            .get_opcodes() if op[0] != "equal"]
-    yops = [op for op in difflib.SequenceMatcher(a=yoc, b=ync, autojunk=False)
-            .get_opcodes() if op[0] != "equal"]
+    xops = [
+        op
+        for op in difflib.SequenceMatcher(a=xoc, b=xnc, autojunk=False).get_opcodes()
+        if op[0] != "equal"
+    ]
+    yops = [
+        op
+        for op in difflib.SequenceMatcher(a=yoc, b=ync, autojunk=False).get_opcodes()
+        if op[0] != "equal"
+    ]
     y_by_key = defaultdict(list)
     y1v1_at = {}  # 旧 Y 块索引 → 1:1 replace 组（整组未配对时的回落配对）
     for t, i1, i2, j1, j2 in yops:
@@ -212,8 +227,9 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
         a = pmap.get(i1) if i1 < len(xoc) else len(yoc)
         if a is None:
             # 锚点块被规则消除（HEAD 上无 Y 对应块），无法配对 → 疑似
-            pairs.append(("suspect",
-                          ("\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])), None))
+            pairs.append(
+                ("suspect", ("\n".join(xoc[i1:i2]), "\n".join(xnc[j1:j2])), None)
+            )
             gate = False
             continue
         key = (a, t, i2 - i1, j2 - j1)
@@ -231,7 +247,8 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
                         consumed_y.add(yg[1])
                         _, yi1, _, yj1, _ = yg
                         kind, used, fired = classify_block(
-                            vol, rules, xo, xn, yoc[yi1], ync[yj1])
+                            vol, rules, xo, xn, yoc[yi1], ync[yj1]
+                        )
                         used_rules += used
                         fired_rules += fired
                         pairs.append((kind, (xo, xn), (yoc[yi1], ync[yj1])))
@@ -258,13 +275,14 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
             pairs.append(("sync", (xo_s, xn_s), (yo_s, yn_s)))  # 结构组
             continue
         for k in range(i2 - i1):  # 1:1 组逐块走块级分类
-            kind, used, fired = classify_block(vol, rules,
-                                               xoc[i1 + k], xnc[j1 + k],
-                                               yoc[yi1 + k], ync[yj1 + k])
+            kind, used, fired = classify_block(
+                vol, rules, xoc[i1 + k], xnc[j1 + k], yoc[yi1 + k], ync[yj1 + k]
+            )
             used_rules += used
             fired_rules += fired
-            pairs.append((kind, (xoc[i1 + k], xnc[j1 + k]),
-                          (yoc[yi1 + k], ync[yj1 + k])))
+            pairs.append(
+                (kind, (xoc[i1 + k], xnc[j1 + k]), (yoc[yi1 + k], ync[yj1 + k]))
+            )
             if kind not in ("sync", "rulekilled"):
                 gate = False
     for ops in y_by_key.values():  # Y 侧未配对组 → 疑似
@@ -272,8 +290,9 @@ def structural_pairs(vol: str, rules: list, xh: bytes, xw: bytes,
             if op[1] in consumed_y:
                 continue
             t, yi1, yi2, yj1, yj2 = op
-            pairs.append(("suspect", None,
-                          ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2]))))
+            pairs.append(
+                ("suspect", None, ("\n".join(yoc[yi1:yi2]), "\n".join(ync[yj1:yj2])))
+            )
             gate = False
     return pairs, gate, used_rules, fired_rules
 
@@ -299,8 +318,9 @@ def convergent(vol: str, o: str, n: str, other_frags: set, used: list) -> bool:
     的键（卷名或 "*"），供 report_inactive_rules 验证是否失活。
     """
     cur = block_frags(o, n)
-    rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
-             + [("*", ro, rn) for ro, rn in fixes["*"]])
+    rules = [(vol, ro, rn) for ro, rn in fixes.get(vol, [])] + [
+        ("*", ro, rn) for ro, rn in fixes["*"]
+    ]
     changed = True
     while changed:
         changed = False
@@ -388,14 +408,16 @@ def classify() -> dict:
         vol = rel.split("/")[0]
         # 规则触点：规则若能命中改动块的【旧】X 文本，上游改动可能使其失效
         # （收敛采纳 / 改写为第三种形式都算）——全部记为 report_inactive_rules 候选，验证把关
-        rules = ([(vol, ro, rn) for ro, rn in fixes.get(vol, [])]
-                 + [("*", ro, rn) for ro, rn in fixes["*"]])
+        rules = [(vol, ro, rn) for ro, rn in fixes.get(vol, [])] + [
+            ("*", ro, rn) for ro, rn in fixes["*"]
+        ]
         if structural:
             # 结构改动（块增删/N→M）：块组级配对分类。gate 通过（全
             # sync/rulekilled）的文件记入 structural_ok，--commit 时随原子
             # 提交整文件入仓；否则整文件留审（块对照常导出供审查/反馈）
             pairs, gate, used, fired = structural_pairs(
-                vol, rules, head[xp], work[xp], head[yp], work[yp], pmap)
+                vol, rules, head[xp], work[xp], head[yp], work[yp], pmap
+            )
             for r in used:
                 rule_use[r].add(rel)
             for r in fired:
@@ -438,18 +460,26 @@ def classify() -> dict:
                 pairs.append(("suspect", None, (yo, yn)))  # 仅 Y 有改动
         pairs_by_rel[rel] = pairs
 
-    return {"pairs_by_rel": pairs_by_rel, "complex": complex_rels,
-            "new_files": new_only, "rule_use": rule_use,
-            "touched_rules": touched_rules,
-            "rulekilled_rules": rulekilled_rules,
-            "structural_ok": structural_ok,
-            "head": head, "work": work}
+    return {
+        "pairs_by_rel": pairs_by_rel,
+        "complex": complex_rels,
+        "new_files": new_only,
+        "rule_use": rule_use,
+        "touched_rules": touched_rules,
+        "rulekilled_rules": rulekilled_rules,
+        "structural_ok": structural_ok,
+        "head": head,
+        "work": work,
+    }
 
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--commit", action="store_true",
-                        help="门控通过后一笔原子提交全部文本改动；默认只分类导出审查材料")
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="门控通过后一笔原子提交全部文本改动；默认只分类导出审查材料",
+    )
     do_commit = parser.parse_args().commit
     r = classify()
     pairs_by_rel = r["pairs_by_rel"]
@@ -464,7 +494,9 @@ def main() -> None:
 
     n_sync = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "sync")
     n_mixed = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "mixed")
-    n_adopted = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "adopted")
+    n_adopted = sum(
+        1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "adopted"
+    )
     n_rk = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "rulekilled")
     n_susp = sum(1 for ps in pairs_by_rel.values() for k, _, _ in ps if k == "suspect")
     print(f"{len(pairs_by_rel):5d}  有文本改动的文件对")
@@ -488,11 +520,16 @@ def main() -> None:
             if k in ("sync", "mixed") and xb:
                 agg[xb] += 1
                 agg_rels[xb].append(rel)
-    with open(os.path.join(STATE_DIR, "review_changes.txt"), "w",
-              encoding="utf-8") as f:
-        f.writelines(f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n" for (o, n), c in agg.most_common())
-    with open(os.path.join(STATE_DIR, "suspect_changes.txt"), "w",
-              encoding="utf-8") as f:
+    with open(
+        os.path.join(STATE_DIR, "review_changes.txt"), "w", encoding="utf-8"
+    ) as f:
+        f.writelines(
+            f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n"
+            for (o, n), c in agg.most_common()
+        )
+    with open(
+        os.path.join(STATE_DIR, "suspect_changes.txt"), "w", encoding="utf-8"
+    ) as f:
         for rel, ps in pairs_by_rel.items():
             for k, xb, yb in ps:
                 if k != "suspect":
@@ -501,24 +538,34 @@ def main() -> None:
                     if b:
                         f.write(f"[{side}] {rel}\n- {b[0]}\n+ {b[1]}\n\n")
     plan = {
-        "summary": {"pairs": len(pairs_by_rel), "sync": n_sync,
-                    "mixed": n_mixed, "adopted": n_adopted,
-                    "rulekilled": n_rk, "suspect": n_susp,
-                    "complex": len(complex_rels)},
-        "files": {rel: [{"kind": k, "x": xb, "y": yb}
-                        for k, xb, yb in ps if k != "sync"]
-                  for rel, ps in pairs_by_rel.items()
-                  if any(k != "sync" for k, _, _ in ps)},
+        "summary": {
+            "pairs": len(pairs_by_rel),
+            "sync": n_sync,
+            "mixed": n_mixed,
+            "adopted": n_adopted,
+            "rulekilled": n_rk,
+            "suspect": n_susp,
+            "complex": len(complex_rels),
+        },
+        "files": {
+            rel: [{"kind": k, "x": xb, "y": yb} for k, xb, yb in ps if k != "sync"]
+            for rel, ps in pairs_by_rel.items()
+            if any(k != "sync" for k, _, _ in ps)
+        },
         "complex": complex_rels,
         "structural_ok": sorted(structural_ok),
         "new_files": new_only,
-        "adopted_rules": {f"{sec}: {ro} -> {rn}": sorted(rels)
-                       for (sec, ro, rn), rels in sorted(rule_use.items())},
+        "adopted_rules": {
+            f"{sec}: {ro} -> {rn}": sorted(rels)
+            for (sec, ro, rn), rels in sorted(rule_use.items())
+        },
     }
     with open(os.path.join(STATE_DIR, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=1)
-    print(f"审查材料: {os.path.join(STATE_DIR, 'review_changes.txt')}"
-          f"（{sum(agg.values())} 块 / 去重 {len(agg)}）")
+    print(
+        f"审查材料: {os.path.join(STATE_DIR, 'review_changes.txt')}"
+        f"（{sum(agg.values())} 块 / 去重 {len(agg)}）"
+    )
     if n_susp:
         print(f"疑似上游错误: {os.path.join(STATE_DIR, 'suspect_changes.txt')}")
 
@@ -526,27 +573,40 @@ def main() -> None:
         if hold:
             print(f"挂起清单 {len(hold)} 条（{hold_path()}）")
         clean_scratch()
-        print("审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
-              "uv run python scripts/sync/x2y.py，再带 --commit 运行")
+        print(
+            "审查后为可疑改动写 x2y 规则（校正或回钉旧文本），重跑 "
+            "uv run python scripts/sync/x2y.py，再带 --commit 运行"
+        )
         return
 
     # 提交门：任何未收敛/未处理块都中止——先写规则、重跑 x2y 后再来。
     # 挂起清单内的 rel 不计入门控（held = 不提交也不阻塞）。
-    n_susp_unheld = sum(1 for rel, ps in pairs_by_rel.items() if rel not in hold
-                        for k, _, _ in ps if k == "suspect")
+    n_susp_unheld = sum(
+        1
+        for rel, ps in pairs_by_rel.items()
+        if rel not in hold
+        for k, _, _ in ps
+        if k == "suspect"
+    )
     complex_unheld = [r for r in complex_rels if r not in hold]
     if n_susp != n_susp_unheld or len(complex_rels) != len(complex_unheld):
-        print(f"提示: 挂起 rel 不计入门控（其中含疑似 {n_susp - n_susp_unheld} 块、"
-              f"复杂 {len(complex_rels) - len(complex_unheld)} 文件）")
+        print(
+            f"提示: 挂起 rel 不计入门控（其中含疑似 {n_susp - n_susp_unheld} 块、"
+            f"复杂 {len(complex_rels) - len(complex_unheld)} 文件）"
+        )
     problems = []
     if n_susp_unheld:
         problems.append(f"{n_susp_unheld} 个疑似块（见 suspect_changes.txt）")
     if complex_unheld:
-        problems.append(f"{len(complex_unheld)} 个复杂文件（对齐失败）: "
-                        + "、".join(complex_unheld[:5]))
+        problems.append(
+            f"{len(complex_unheld)} 个复杂文件（对齐失败）: "
+            + "、".join(complex_unheld[:5])
+        )
     if problems:
-        print("中止：存在未处理改动。为对应文本写 x2y 规则（校正或回钉旧文本），"
-              "重跑 uv run python scripts/sync/x2y.py 后重新 --commit：")
+        print(
+            "中止：存在未处理改动。为对应文本写 x2y 规则（校正或回钉旧文本），"
+            "重跑 uv run python scripts/sync/x2y.py 后重新 --commit："
+        )
         for p in problems:
             print("  -", p)
         raise SystemExit(1)
@@ -565,39 +625,47 @@ def main() -> None:
         if rel is None or (rel not in covered and rel not in hold):
             uncovered.append(line)
     if uncovered:
-        print("中止：以下改动未被文本改动覆盖（二进制/重命名/仅单侧增删等），"
-              "人工审查按性质提交后重跑 --commit：")
+        print(
+            "中止：以下改动未被文本改动覆盖（二进制/重命名/仅单侧增删等），"
+            "人工审查按性质提交后重跑 --commit："
+        )
         print("\n".join(uncovered[:30]))
         raise SystemExit(1)
 
     commit_rels = sorted(covered - set(hold))
     if commit_rels:
         new_set = set(new_only)
-        n_blocks = sum(1 for rel in commit_rels
-                       for k, xb, _ in pairs_by_rel.get(rel, [])
-                       if k in ("sync", "mixed") and xb)
+        n_blocks = sum(
+            1
+            for rel in commit_rels
+            for k, xb, _ in pairs_by_rel.get(rel, [])
+            if k in ("sync", "mixed") and xb
+        )
         n_new = len([rel for rel in commit_rels if rel in new_set])
         if n_blocks == 0 and n_new == len(commit_rels):
             subject = f"fix: sync X/Y（新增 {n_new} 文件）"
         elif n_blocks == 0:
             subject = f"fix: sync X/Y（{len(commit_rels)} 文件，规则采纳/渲染）"
         else:
-            subject = (f"fix: sync X/Y（{len(commit_rels)} 文件，"
-                       f"{n_blocks} 处文本修订）")
+            subject = f"fix: sync X/Y（{len(commit_rels)} 文件，{n_blocks} 处文本修订）"
         body_lines = []
         for rel in commit_rels:
             if rel in new_set:
                 body_lines.append(f"{rel}（新增文件）")
                 continue
-            sel = [(k, xb) for k, xb, _ in pairs_by_rel.get(rel, [])
-                   if k in ("sync", "mixed") and xb]
+            sel = [
+                (k, xb)
+                for k, xb, _ in pairs_by_rel.get(rel, [])
+                if k in ("sync", "mixed") and xb
+            ]
             if not sel:
                 continue
-            terms = [t for t in (term_summary(xb[0], xb[1]) for _, xb in sel)
-                     if t]
-            body_lines.append(f"{rel}（{len(sel)} 处）: "
-                              + "；".join(terms[:3])
-                              + ("…" if len(terms) > 3 else ""))
+            terms = [t for t in (term_summary(xb[0], xb[1]) for _, xb in sel) if t]
+            body_lines.append(
+                f"{rel}（{len(sel)} 处）: "
+                + "；".join(terms[:3])
+                + ("…" if len(terms) > 3 else "")
+            )
         body = "\n".join(body_lines[:40])
         if len(body_lines) > 40:
             body += f"\n…（共 {len(body_lines)} 文件）"
@@ -606,26 +674,33 @@ def main() -> None:
         # 会把挂起文件也一并暂存），再精确暂存待提交路径
         git("reset", "-q")
         paths = [f"{side}/{rel}" for rel in commit_rels for side in ("X", "Y")]
-        git("add", "--pathspec-from-file=-", "--pathspec-file-nul",
-            input_bytes="\0".join(paths).encode("utf-8"))
+        git(
+            "add",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+            input_bytes="\0".join(paths).encode("utf-8"),
+        )
         args = ["commit", "-q", "-m", subject]
         if body:
             args += ["-m", body]
         git(*args)
 
     git("add", "-A")
-    left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines()
-            if l]
+    left = [l for l in git("status", "--porcelain").decode("utf-8").splitlines() if l]
     if left:
         # 仅剩挂起改动：单列报告，非零退出（轮次保持开放）
-        print(f"挂起 {len(left)} 条在途改动（{hold_path()}；原因消除后从清单删行，"
-              "重跑 --finish 即可清零）：")
+        print(
+            f"挂起 {len(left)} 条在途改动（{hold_path()}；原因消除后从清单删行，"
+            "重跑 --finish 即可清零）："
+        )
         for rel, reason in sorted(hold.items()):
             print(f"  {rel}: {reason}")
         raise SystemExit(1)
     if commit_rels:
-        print(f"完成。一笔原子提交 {len(commit_rels)} 个文件"
-              f"（{n_blocks} 处文本修订），工作区已清零")
+        print(
+            f"完成。一笔原子提交 {len(commit_rels)} 个文件"
+            f"（{n_blocks} 处文本修订），工作区已清零"
+        )
     else:
         print("工作区已清零（无待提交文本改动）")
     # 轮次结束：rename 映射只服务于轮内 commit_image_renames → commit_image_refs，删除以防跨轮累积

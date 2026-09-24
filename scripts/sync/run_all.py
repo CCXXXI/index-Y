@@ -27,8 +27,9 @@ SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
 def run(script: str, *args: str) -> None:
     print(f"\n===== {script} {' '.join(args)} =====", flush=True)
-    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, script), *args],
-                       check=False)
+    r = subprocess.run(
+        [sys.executable, os.path.join(SCRIPTS, script), *args], check=False
+    )
     if r.returncode != 0:
         raise SystemExit(f"{script} 失败（exit {r.returncode}），中止")
 
@@ -39,35 +40,44 @@ def update_x(zip_path: Path) -> None:
     跨轮残留本身是安全的（.agents/skills/sync-triage/SKILL.md），此 gate 防的是白费在途
     审查与一轮混入两个上游 delta；确认要强行并入可手动跑 update_x.py。
     """
-    r = subprocess.run(["git", "status", "--porcelain", "-z"],
-                       capture_output=True, text=True, check=True)
+    r = subprocess.run(
+        ["git", "status", "--porcelain", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     if r.stdout:
         raise SystemExit(
             "错误：工作区有未提交改动，拒绝并入新上游（上轮未收尾，在途审查"
             "会被新版顶掉）。先 --finish 收尾；确认放弃在途审查则手动运行 "
-            "uv run python scripts/sync/update_x.py <zip>")
+            "uv run python scripts/sync/update_x.py <zip>"
+        )
     if not zip_path.is_file():
         raise SystemExit(f"错误：zip 不存在：{zip_path}")
     # HEAD 自洽门控：工作区干净时等价于校验 HEAD——上轮改 rules/ 后漏跑
     # x2y.py 会留下陈旧 Y，本轮重跑 x2y 会把规则补渲染当「仅 Y 改动」混进审查
     print("\n===== check_y_freshness.py（HEAD 自洽门控） =====", flush=True)
-    r = subprocess.run([sys.executable,
-                        os.path.join(SCRIPTS, "check_y_freshness.py")],
-                       check=False)
+    r = subprocess.run(
+        [sys.executable, os.path.join(SCRIPTS, "check_y_freshness.py")], check=False
+    )
     if r.returncode != 0:
         raise SystemExit(
             "HEAD 的 X/Y/rules 不自洽（上轮改 rules/ 后漏跑 x2y.py？）。先重跑 "
-            "uv run python scripts/sync/x2y.py，把 Y 侧规则效果提交，再开始新一轮")
+            "uv run python scripts/sync/x2y.py，把 Y 侧规则效果提交，再开始新一轮"
+        )
     run("update_x.py", str(zip_path))
 
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("zip", nargs="?", type=Path,
-                        help="上游下载的 zip；提供时先运行 update_x 起新轮")
-    parser.add_argument("--finish", action="store_true",
-                        help="人工审查后收尾：triage_text --commit → "
-                             "report_inactive_rules")
+    parser.add_argument(
+        "zip", nargs="?", type=Path, help="上游下载的 zip；提供时先运行 update_x 起新轮"
+    )
+    parser.add_argument(
+        "--finish",
+        action="store_true",
+        help="人工审查后收尾：triage_text --commit → report_inactive_rules",
+    )
     args = parser.parse_args()
     if args.finish:
         if args.zip is not None:

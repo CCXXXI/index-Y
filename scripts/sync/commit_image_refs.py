@@ -25,8 +25,7 @@ from lib_triage import (
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只统计，不实际提交")
+    parser.add_argument("--dry-run", action="store_true", help="只统计，不实际提交")
     dry = parser.parse_args().dry_run
     map_path = os.path.join(STATE_DIR, "rename_map.json")
     if not os.path.exists(map_path):
@@ -48,7 +47,7 @@ def main() -> None:
     for path in cands:
         try:
             text = cf.read(hm[path]).decode("utf-8")
-        except (UnicodeDecodeError, KeyError):
+        except UnicodeDecodeError, KeyError:
             continue
         new_text = pattern.sub(lambda m: renames[m.group(0)], text)
         if new_text != text:
@@ -64,12 +63,17 @@ def main() -> None:
 
     # 校验：暂存 diff 全部变更行都是图片名替换
     bad = 0
-    for line in git("diff", "--cached", "--unified=0").decode("utf-8", "replace").splitlines():
+    for line in (
+        git("diff", "--cached", "--unified=0").decode("utf-8", "replace").splitlines()
+    ):
         if line.startswith("-") and not line.startswith("---"):
             if not any(k in line for k in renames):
                 bad += 1
-        elif (line.startswith("+") and not line.startswith("+++")
-              and any(k in line for k in renames)):
+        elif (
+            line.startswith("+")
+            and not line.startswith("+++")
+            and any(k in line for k in renames)
+        ):
             bad += 1
     assert bad == 0, f"暂存区含 {bad} 行非图片路径变更，中止"
     git("commit", "-q", "-m", "refactor: update image references for renamed files")

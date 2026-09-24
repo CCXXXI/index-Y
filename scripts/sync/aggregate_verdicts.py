@@ -59,8 +59,10 @@ def main() -> int:
                 verdicts[v["id"]] = v
 
     missing = sorted(set(want) - set(verdicts))
-    print(f"块总数 {len(want)}，已收 verdict {len(verdicts)}，"
-          f"缺 {len(missing)}，坏行 {len(bad)}")
+    print(
+        f"块总数 {len(want)}，已收 verdict {len(verdicts)}，"
+        f"缺 {len(missing)}，坏行 {len(bad)}"
+    )
     if missing:
         print("缺 id:", missing[:50])
     for t in bad[:20]:
@@ -97,12 +99,19 @@ def main() -> int:
 
     print("verdict 分布:", dict(Counter(v["verdict"] for v in verdicts.values())))
     for kind in ("suspect", "unsure", "unlocated"):
-        items = [{
-            "id": i, "file": want[i]["files"],
-            "old": want[i]["old"], "new": want[i]["new"],
-            "cls": v.get("cls", ""), "jp": v.get("jp", ""),
-            "reason": v.get("reason", ""),
-        } for i, v in sorted(verdicts.items()) if v["verdict"] == kind]
+        items = [
+            {
+                "id": i,
+                "file": want[i]["files"],
+                "old": want[i]["old"],
+                "new": want[i]["new"],
+                "cls": v.get("cls", ""),
+                "jp": v.get("jp", ""),
+                "reason": v.get("reason", ""),
+            }
+            for i, v in sorted(verdicts.items())
+            if v["verdict"] == kind
+        ]
         dst = os.path.join(triage, f"verdict_{kind}.json")
         with open(dst, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=1)

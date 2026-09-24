@@ -8,6 +8,7 @@
 卷级说明），同样须 3 字段；空行禁止。全文件列数一致是 GitHub、PyCharm 等
 严格 TSV 预览正常渲染的前提。应用顺序：分卷规则先于通用规则，文件内自上而下。
 """
+
 import argparse
 import shutil
 import sys
@@ -41,25 +42,31 @@ def load_rule_records() -> list[dict]:
             if len(fields) != 3:
                 errors.append(
                     f"{tsv.name}:{lineno}: 字段数 {len(fields)} ≠ 3"
-                    "（空字段行尾的 tab 可能被编辑器吞掉；空行禁止）")
+                    "（空字段行尾的 tab 可能被编辑器吞掉；空行禁止）"
+                )
                 continue
             old, new, note = fields
             if old.startswith("#"):
                 continue
             if not old:
-                errors.append(
-                    f"{tsv.name}:{lineno}: old 为空（说明行请以 # 开头）")
+                errors.append(f"{tsv.name}:{lineno}: old 为空（说明行请以 # 开头）")
                 continue
             if old in seen:
-                errors.append(
-                    f"{tsv.name}:{lineno}: old 与第 {seen[old]} 行重复")
+                errors.append(f"{tsv.name}:{lineno}: old 与第 {seen[old]} 行重复")
             seen[old] = lineno
             try:
                 re.compile(old)
             except re.error as e:
                 errors.append(f"{tsv.name}:{lineno}: 正则编译失败: {e}")
-            records.append({"section": section, "lineno": lineno,
-                            "old": old, "new": new, "note": note})
+            records.append(
+                {
+                    "section": section,
+                    "lineno": lineno,
+                    "old": old,
+                    "new": new,
+                    "note": note,
+                }
+            )
     if errors:
         sys.exit("rules/ 校验失败：\n" + "\n".join(errors))
     return records
@@ -99,6 +106,6 @@ def x2y():
 
 if __name__ == "__main__":
     argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
     x2y()

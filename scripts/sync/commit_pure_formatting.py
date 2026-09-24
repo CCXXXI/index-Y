@@ -23,8 +23,7 @@ from lib_triage import (
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只统计，不实际提交")
+    parser.add_argument("--dry-run", action="store_true", help="只统计，不实际提交")
     dry = parser.parse_args().dry_run
     cands = modified_text_files()
     print(f"候选 M 文本文件 {len(cands)}")
@@ -46,10 +45,21 @@ def main() -> None:
         return
 
     git("reset", "-q")
-    git("add", "--pathspec-from-file=-", "--pathspec-file-nul",
-        input_bytes="\0".join(passed).encode("utf-8"))
-    n = len([p for p in git("diff", "--cached", "--name-only", "-z")
-             .decode("utf-8").split("\0") if p])
+    git(
+        "add",
+        "--pathspec-from-file=-",
+        "--pathspec-file-nul",
+        input_bytes="\0".join(passed).encode("utf-8"),
+    )
+    n = len(
+        [
+            p
+            for p in git("diff", "--cached", "--name-only", "-z")
+            .decode("utf-8")
+            .split("\0")
+            if p
+        ]
+    )
     assert n == len(passed), f"暂存 {n} != {len(passed)}"
     git("commit", "-q", "-m", "style: pure formatting changes (no text/display impact)")
     git("add", "-A")

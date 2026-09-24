@@ -31,12 +31,16 @@ def main() -> None:
     for src in (r["rule_use"], r["touched_rules"], r["rulekilled_rules"]):
         for k, rels in src.items():
             cand[k] |= rels
-    adopted_rules = [{"section": sec, "old": ro, "new": rn, "rels": sorted(rels)}
-                     for (sec, ro, rn), rels in sorted(cand.items())]
+    adopted_rules = [
+        {"section": sec, "old": ro, "new": rn, "rels": sorted(rels)}
+        for (sec, ro, rn), rels in sorted(cand.items())
+    ]
     with open(cand_path, "w", encoding="utf-8") as f:
         json.dump(adopted_rules, f, ensure_ascii=False, indent=1)
-    print(f"失活规则候选 {len(adopted_rules)} 条 → {cand_path}"
-          "（report_inactive_rules 消费）")
+    print(
+        f"失活规则候选 {len(adopted_rules)} 条 → {cand_path}"
+        "（report_inactive_rules 消费）"
+    )
 
 
 if __name__ == "__main__":

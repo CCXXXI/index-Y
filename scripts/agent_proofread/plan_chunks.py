@@ -20,8 +20,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
-WRAPPER_SUFFIXES = ("Cover", "Back_cover", "Illustrations", "Information",
-                    "Introduction", "Note", "Special")
+WRAPPER_SUFFIXES = (
+    "Cover",
+    "Back_cover",
+    "Illustrations",
+    "Information",
+    "Introduction",
+    "Note",
+    "Special",
+)
 
 
 def strip_cn(line: str) -> str:
@@ -31,7 +38,11 @@ def strip_cn(line: str) -> str:
 
 
 def resolve_text_dir(vol_arg: str) -> tuple[str, Path]:
-    matches = [d.name for d in (ROOT / "Y").iterdir() if d.is_dir() and d.name.startswith(vol_arg)]
+    matches = [
+        d.name
+        for d in (ROOT / "Y").iterdir()
+        if d.is_dir() and d.name.startswith(vol_arg)
+    ]
     if len(matches) != 1:
         sys.exit(f"卷参数 {vol_arg!r} 在 Y/ 下匹配到 {len(matches)} 个目录: {matches}")
     text_dir = ROOT / "Y" / matches[0] / "OEBPS" / "Text"
@@ -77,7 +88,9 @@ def plan(files: list[Path], target: int) -> list[Chunk]:
     chunks: list[Chunk] = []
     cur = Chunk()
     for path in files:
-        sizes = [len(strip_cn(ln)) for ln in path.read_text(encoding="utf-8").split("\n")]
+        sizes = [
+            len(strip_cn(ln)) for ln in path.read_text(encoding="utf-8").split("\n")
+        ]
         total = len(sizes)
         lo = 0
         while lo < total:
@@ -99,8 +112,9 @@ def plan(files: list[Path], target: int) -> list[Chunk]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
     ap.add_argument("--target-chars", type=int, default=15000, help="每块目标字符数")
     ap.add_argument("--overlap", type=int, default=10, help="上下文重叠行数")
@@ -117,8 +131,10 @@ def main() -> int:
         target += 2000
 
     total_chars = sum(c.chars for c in chunks)
-    print(f"{vol}: {len(files)} 个正文文件 -> {len(chunks)} 块"
-          f"（目标 {target} 字符/块，共约 {total_chars // 1000}k 字符）")
+    print(
+        f"{vol}: {len(files)} 个正文文件 -> {len(chunks)} 块"
+        f"（目标 {target} 字符/块，共约 {total_chars // 1000}k 字符）"
+    )
     for i, c in enumerate(chunks, 1):
         segs = []
         for p in c.parts:
@@ -135,25 +151,35 @@ def main() -> int:
             segs.append(seg)
         print(f"块{i:2d} [{c.chars // 1000}k] {'、'.join(segs)}")
         goal = "；".join(
-            f"{p.path} 第 {p.start}-{p.end} 行" + ("" if p.whole else "（前后各约 10 行为重叠上下文，发现只报主区间）")
-            for p in c.parts)
+            f"{p.path} 第 {p.start}-{p.end} 行"
+            + ("" if p.whole else "（前后各约 10 行为重叠上下文，发现只报主区间）")
+            for p in c.parts
+        )
         print(f"     goal: 校对通读 {goal}（约 {c.chars // 1000} 千字符）")
 
     # 全部块共用的分派参数：context 短指令（子 agent 自载模板）+ output_schema。
     # schema 单一来源是模板【output_schema】节，此处提取后原样转印。
-    template = (ROOT / ".agents" / "skills" / "agent-proofread"
-                / "templates" / "chapter-agent-prompt.md").read_text(encoding="utf-8")
+    template = (
+        ROOT
+        / ".agents"
+        / "skills"
+        / "agent-proofread"
+        / "templates"
+        / "chapter-agent-prompt.md"
+    ).read_text(encoding="utf-8")
     m = re.search(r"【output_schema】[^\n]*\n(\{.*?\})\s*$", template, flags=re.DOTALL)
     if not m:
         sys.exit("模板【output_schema】节提取失败，请检查模板尾部格式")
     schema = re.sub(r"\s+", "", m.group(1))
     vol_prefix = vol.split("]")[0]
     print("\ncontext（全部块共用，逐字复制进每个 task）:")
-    print(f'按本仓库 .agents/skills/agent-proofread/templates/chapter-agent-prompt.md 模板执行'
-          f'（先 skill_view(name="agent-proofread", file_path="templates/chapter-agent-prompt.md") 加载）：'
-          f'模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}（含左方括号）。'
-          f'goal 给出的行区间即你的校对主区间，逐行通读；疑点回原文核对用模板规定的 proofreading_locate.py 批量清单法。'
-          f'final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。')
+    print(
+        f"按本仓库 .agents/skills/agent-proofread/templates/chapter-agent-prompt.md 模板执行"
+        f'（先 skill_view(name="agent-proofread", file_path="templates/chapter-agent-prompt.md") 加载）：'
+        f"模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}（含左方括号）。"
+        f"goal 给出的行区间即你的校对主区间，逐行通读；疑点回原文核对用模板规定的 proofreading_locate.py 批量清单法。"
+        f"final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。"
+    )
     print("\noutput_schema（全部块共用，逐字复制进每个 task）:")
     print(schema)
     return 0

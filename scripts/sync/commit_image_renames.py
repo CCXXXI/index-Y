@@ -18,8 +18,9 @@ STATE_DIR = os.path.join(repo_root(), ".triage")
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只统计并写 rename 映射，不实际提交")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="只统计并写 rename 映射，不实际提交"
+    )
     dry = parser.parse_args().dry_run
     git("add", "-A")  # 统一从「全部暂存」状态出发
     pairs = staged_renames()
@@ -49,8 +50,13 @@ def main() -> None:
 
     # 重建索引：只暂存图片 rename（from 删除 + to 新增）
     git("reset", "-q")
-    git("add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
-        input_bytes="\0".join(p for pr in img for p in pr).encode("utf-8"))
+    git(
+        "add",
+        "-A",
+        "--pathspec-from-file=-",
+        "--pathspec-file-nul",
+        input_bytes="\0".join(p for pr in img for p in pr).encode("utf-8"),
+    )
     n_staged = len(staged_renames())
     assert n_staged == len(img), f"暂存 rename 数 {n_staged} != {len(img)}"
 

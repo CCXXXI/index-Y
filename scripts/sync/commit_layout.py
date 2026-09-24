@@ -24,8 +24,7 @@ from lib_triage import (
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只统计，不实际提交")
+    parser.add_argument("--dry-run", action="store_true", help="只统计，不实际提交")
     dry = parser.parse_args().dry_run
     cands = modified_text_files()
     print(f"候选 M 文本文件 {len(cands)}")
@@ -48,7 +47,9 @@ def main() -> None:
         else:
             to_stage.append((path, staged))
     cf.close()
-    print(f"版式入提交 {len(to_stage)}，纯文本留审 {len(text_only)}，无法分离留审 {len(left)}")
+    print(
+        f"版式入提交 {len(to_stage)}，纯文本留审 {len(text_only)}，无法分离留审 {len(left)}"
+    )
     if dry or not to_stage:
         return
 
@@ -73,8 +74,12 @@ def main() -> None:
             print("  文本不一致:", path)
     cf.close()
     assert bad == 0, f"{bad} 个文件校验失败，中止"
-    git("commit", "-q", "-m",
-        "refactor: layout adjustments (structure/attributes only, no text changes)")
+    git(
+        "commit",
+        "-q",
+        "-m",
+        "refactor: layout adjustments (structure/attributes only, no text changes)",
+    )
     git("add", "-A")
     print("已提交版式调整")
 

@@ -55,7 +55,9 @@ def jp_flex_ok(evidence: str, corpus: str) -> bool:
 
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
-    matches = [d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)]
+    matches = [
+        d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
+    ]
     if len(matches) != 1:
         sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
     return matches[0]
@@ -66,7 +68,10 @@ def jp_corpus(jp_root: Path, vol: str) -> str:
     prefix = vol.split("]")[0] + "]"
     dirs = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
     if not dirs:
-        print(f"警告：{jp_root} 下未找到 {prefix} 原文目录，jp 验证全部跳过", file=sys.stderr)
+        print(
+            f"警告：{jp_root} 下未找到 {prefix} 原文目录，jp 验证全部跳过",
+            file=sys.stderr,
+        )
         return ""
     parts = []
     for d in dirs:
@@ -77,11 +82,14 @@ def jp_corpus(jp_root: Path, vol: str) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
     ap.add_argument("findings", type=Path, help="findings JSON（数组）")
-    ap.add_argument("-o", "--out", type=Path, help="输出 JSON（默认 <findings>.verified.json）")
+    ap.add_argument(
+        "-o", "--out", type=Path, help="输出 JSON（默认 <findings>.verified.json）"
+    )
     ap.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
     args = ap.parse_args()
 
@@ -89,8 +97,11 @@ def main() -> int:
     findings: list[dict] = json.loads(args.findings.read_text(encoding="utf-8-sig"))
     y_dir = ROOT / "Y" / vol
     x_dir = ROOT / "X" / vol
-    jp = jp_corpus(args.jp_root, vol) if any(
-        f.get("jp_evidence") or f.get("jp") for f in findings) else ""
+    jp = (
+        jp_corpus(args.jp_root, vol)
+        if any(f.get("jp_evidence") or f.get("jp") for f in findings)
+        else ""
+    )
 
     line_cache: dict[str, list[str]] = {}
 
@@ -142,8 +153,10 @@ def main() -> int:
 
     out = args.out or args.findings.with_suffix(".verified.json")
     out.write_text(json.dumps(findings, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"共 {len(findings)} 条：引文不符 {bad_quote}，日文不符 {bad_jp}，"
-          f"X≠Y {sum(1 for f in findings if f['x_same'] is False)} 条 -> {out}")
+    print(
+        f"共 {len(findings)} 条：引文不符 {bad_quote}，日文不符 {bad_jp}，"
+        f"X≠Y {sum(1 for f in findings if f['x_same'] is False)} 条 -> {out}"
+    )
     return 0
 
 

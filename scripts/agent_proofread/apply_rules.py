@@ -48,7 +48,11 @@ def parse_tsv(path: Path) -> list[tuple[str, str, str]]:
 
 
 def resolve_vol(vol_arg: str) -> str:
-    matches = [d.name for d in (ROOT / "X").iterdir() if d.is_dir() and d.name.startswith(vol_arg)]
+    matches = [
+        d.name
+        for d in (ROOT / "X").iterdir()
+        if d.is_dir() and d.name.startswith(vol_arg)
+    ]
     if len(matches) != 1:
         sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
     return matches[0]
@@ -70,14 +74,22 @@ def final_form(new: str, common: list[tuple[str, str]]) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
     ap.add_argument("candidates", type=Path, help="候选规则 TSV（旧/新/注释）")
-    ap.add_argument("--replace", action="append", default=[],
-                    help="被候选取代、需从分卷 TSV 删除的既有旧串（可重复）")
-    ap.add_argument("--verify-y", action="store_true",
-                    help="不写盘：对 Y 产物终验（x2y 重建后运行）")
+    ap.add_argument(
+        "--replace",
+        action="append",
+        default=[],
+        help="被候选取代、需从分卷 TSV 删除的既有旧串（可重复）",
+    )
+    ap.add_argument(
+        "--verify-y",
+        action="store_true",
+        help="不写盘：对 Y 产物终验（x2y 重建后运行）",
+    )
     args = ap.parse_args()
 
     vol = resolve_vol(args.vol)
@@ -89,9 +101,13 @@ def main() -> int:
         y_text = "".join(
             p.read_text(encoding="utf-8")
             for p in sorted((ROOT / "Y" / vol).rglob("*"))
-            if p.is_file() and p.suffix in TEXT_EXT)
-        fails = [n for _, n, _ in candidates
-                 if (ff := final_form(n, common)) and ff not in y_text]
+            if p.is_file() and p.suffix in TEXT_EXT
+        )
+        fails = [
+            n
+            for _, n, _ in candidates
+            if (ff := final_form(n, common)) and ff not in y_text
+        ]
         if fails:
             sys.exit("Y 终验失败（终态未出现）：\n" + "\n".join(f[:40] for f in fails))
         print(f"Y 终验通过：{len(candidates)} 条终态全部在 Y 产物中确认")
@@ -136,12 +152,18 @@ def main() -> int:
                 if v == vol:
                     inv_lit[o] += lit
             total_re[o] += len(re.findall(o, text))
-    bad = [f"{o[:40]}: 字面{total_lit[o]} 正则{total_re[o]}" for o, _, _ in candidates
-           if total_lit[o] != total_re[o]]
+    bad = [
+        f"{o[:40]}: 字面{total_lit[o]} 正则{total_re[o]}"
+        for o, _, _ in candidates
+        if total_lit[o] != total_re[o]
+    ]
     if bad:
         sys.exit("正则守卫失败（含未转义元字符？）：\n" + "\n".join(bad))
-    out_of_vol = [f"{o[:40]}: 全语料{total_lit[o]} 本卷{inv_lit[o]}"
-                  for o, _, _ in candidates if total_lit[o] != inv_lit[o] or inv_lit[o] == 0]
+    out_of_vol = [
+        f"{o[:40]}: 全语料{total_lit[o]} 本卷{inv_lit[o]}"
+        for o, _, _ in candidates
+        if total_lit[o] != inv_lit[o] or inv_lit[o] == 0
+    ]
     if out_of_vol:
         sys.exit("归属待裁决（跨卷命中或本卷无命中）：\n" + "\n".join(out_of_vol))
 
@@ -161,34 +183,53 @@ def main() -> int:
             content = re.sub(o, n, content)
         transformed.append(content)
     sim_text = "\n".join(transformed)
-    fails = [f"{o[:40]}: 触发{fired[o]} ≠ 本卷{inv_lit[o]}" for o, _, _ in candidates
-             if fired[o] != inv_lit[o]]
-    fails += [f"终态未出现: {ff[:40]}" for _, n, _ in candidates
-              if (ff := final_form(n, common)) and ff not in sim_text]
+    fails = [
+        f"{o[:40]}: 触发{fired[o]} ≠ 本卷{inv_lit[o]}"
+        for o, _, _ in candidates
+        if fired[o] != inv_lit[o]
+    ]
+    fails += [
+        f"终态未出现: {ff[:40]}"
+        for _, n, _ in candidates
+        if (ff := final_form(n, common)) and ff not in sim_text
+    ]
     if fails:
         sys.exit("管道模拟失败：\n" + "\n".join(fails))
 
     # 5. 写 TSV（保表头），再用真实 x2y 模块终验
     tsv.write_text(
-        "\n".join([HEADER] + [f"{o}\t{n}\t{c}" for o, n, c in kept + candidates]) + "\n",
-        encoding="utf-8", newline="\n")
-    spec = importlib.util.spec_from_file_location("x2y_mod", ROOT / "scripts/sync/x2y.py")
+        "\n".join([HEADER] + [f"{o}\t{n}\t{c}" for o, n, c in kept + candidates])
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    spec = importlib.util.spec_from_file_location(
+        "x2y_mod", ROOT / "scripts/sync/x2y.py"
+    )
     assert spec is not None and spec.loader is not None, "x2y.py 加载失败"
     x2y_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(x2y_mod)  # 模块加载即全量规则校验，失败直接退出
     real_text = "\n".join(
         x2y_mod.fixed(vol, p.read_text(encoding="utf-8"))
         for p in sorted((ROOT / "X" / vol).rglob("*"))
-        if p.is_file() and p.suffix in TEXT_EXT)
-    fails = [f"真管道终态未出现: {ff[:40]}" for _, n, _ in candidates
-             if (ff := final_form(n, common)) and ff not in real_text]
+        if p.is_file() and p.suffix in TEXT_EXT
+    )
+    fails = [
+        f"真管道终态未出现: {ff[:40]}"
+        for _, n, _ in candidates
+        if (ff := final_form(n, common)) and ff not in real_text
+    ]
     if fails:
         sys.exit("真管道终验失败：\n" + "\n".join(fails))
 
-    print(f"OK：{len(candidates)} 条写入 {tsv.name}"
-          f"（删除被取代 {len(replace_set)} 条），双模拟全过。")
-    print("下一步：uv run python scripts/sync/x2y.py && "
-          f"uv run python {Path(__file__).relative_to(ROOT)} {vol} {args.candidates} --verify-y")
+    print(
+        f"OK：{len(candidates)} 条写入 {tsv.name}"
+        f"（删除被取代 {len(replace_set)} 条），双模拟全过。"
+    )
+    print(
+        "下一步：uv run python scripts/sync/x2y.py && "
+        f"uv run python {Path(__file__).relative_to(ROOT)} {vol} {args.candidates} --verify-y"
+    )
     return 0
 
 

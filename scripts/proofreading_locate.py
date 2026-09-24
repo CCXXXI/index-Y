@@ -49,7 +49,9 @@ def parse_needles(path: Path) -> list[Needle]:
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
     """卷参数支持全名或 `[Sx_yy]` 前缀，须唯一匹配 X/ 下卷目录。"""
-    matches = [d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)]
+    matches = [
+        d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
+    ]
     if len(matches) != 1:
         sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
     return matches[0]
@@ -119,10 +121,14 @@ def main() -> None:
     p.add_argument("vol", help="目标卷（X/ 下卷目录全名或 [Sx_yy] 前缀）")
     p.add_argument("needles", type=Path, help="关键词清单文件（UTF-8）")
     p.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
-    p.add_argument("--side", choices=["both", "y"], default="both",
-                   help="both=计数与上下文含 X 侧（默认，供规则归属与旧串截取）；"
-                        "y=只给 Y 侧（agent 通读校对用：子代理证据侧是 Y+日文原文，"
-                        "X/Y 差异只会诱导误报）")
+    p.add_argument(
+        "--side",
+        choices=["both", "y"],
+        default="both",
+        help="both=计数与上下文含 X 侧（默认，供规则归属与旧串截取）；"
+        "y=只给 Y 侧（agent 通读校对用：子代理证据侧是 Y+日文原文，"
+        "X/Y 差异只会诱导误报）",
+    )
     args = p.parse_args()
 
     needles = parse_needles(args.needles)
@@ -137,7 +143,11 @@ def main() -> None:
         per_file = counts[n.cn]
         total = sum(per_file.values())
         if args.side == "both":
-            placement = "分卷段" if total and {k.split("/")[0] for k in per_file} == {vol} else "_common.tsv"
+            placement = (
+                "分卷段"
+                if total and {k.split("/")[0] for k in per_file} == {vol}
+                else "_common.tsv"
+            )
             print(f"  [计数] 全语料 {total} 次 -> {placement}")
         else:
             print(f"  [计数] Y 全语料 {total} 次")

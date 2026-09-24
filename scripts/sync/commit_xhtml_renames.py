@@ -45,6 +45,7 @@ def repair(pairs: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], list[st
     内容（每对删旧路径、新路径写旧 blob），只纠正归属。
     返回 (配对, 歧义路径)；歧义（同名键多对多）不纯移动，整对挂起待人工。
     """
+
     def key(p: str) -> tuple[str, str, str]:
         side, rest = p.split("/", 1)
         d, b = rest.rsplit("/", 1)
@@ -116,10 +117,16 @@ def update_hold(hold: dict[str, list], current_rels: set[str]) -> str:
                     continue  # 本轮 rename 集合内的旧条目由下方新条目取代
                 manual.append(line)
     manual_rels = {l.partition("\t")[0].strip() for l in manual}
-    lines = [("# 挂起清单：triage_text --commit 跳过其中 rel 的提交且不计入门控，"
-              "末尾单列报告；失效条目（对应文件无在途改动）每轮自动剔除。"),
-             ("# rename: 前缀条目由 commit_xhtml_renames 生成"
-              "（其下 # 注释为改动摘要），其余为人工条目（rel<TAB>理由）。")]
+    lines = [
+        (
+            "# 挂起清单：triage_text --commit 跳过其中 rel 的提交且不计入门控，"
+            "末尾单列报告；失效条目（对应文件无在途改动）每轮自动剔除。"
+        ),
+        (
+            "# rename: 前缀条目由 commit_xhtml_renames 生成"
+            "（其下 # 注释为改动摘要），其余为人工条目（rel<TAB>理由）。"
+        ),
+    ]
     lines += manual
     for rel in sorted(hold):
         if rel in manual_rels:
@@ -138,12 +145,13 @@ def commit_pure_moves(moves: list[tuple[str, str]]) -> None:
     hm = head_sha_map()
     git("reset", "-q")  # 索引回到 HEAD；旧路径需显式零模式行删除（否则无 rename 对）
     zero = "0" * 40
-    info = "".join(f"0 {zero}\t{f}\0" f"100644 {hm[f]}\t{t}\0" for f, t in moves)
+    info = "".join(f"0 {zero}\t{f}\0100644 {hm[f]}\t{t}\0" for f, t in moves)
     git("update-index", "-z", "--index-info", input_bytes=info.encode("utf-8"))
     # 校验暂存区：rename 的旧/新路径集合与 moves 一致且全部 R100。
     # （git 的展示配对在双侧内容相同时可能跨侧，无关紧要——索引内容不变）
-    out = git("diff", "--cached", "--name-status", "-z", "-M",
-              "--diff-filter=R").decode("utf-8")
+    out = git(
+        "diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=R"
+    ).decode("utf-8")
     parts = [p for p in out.split("\0") if p]
     got_from, got_to = set(), set()
     i = 0
@@ -152,23 +160,30 @@ def commit_pure_moves(moves: list[tuple[str, str]]) -> None:
         got_from.add(parts[i + 1])
         got_to.add(parts[i + 2])  # diff -z 为 from, to 顺序
         i += 3
-    assert (got_from == {f for f, _ in moves}
-            and got_to == {t for _, t in moves}), (
+    assert got_from == {f for f, _ in moves} and got_to == {t for _, t in moves}, (
         f"暂存 rename 集合不符: 多 {sorted(got_to - {t for _, t in moves})} "
-        f"少 {sorted({t for _, t in moves} - got_to)}")
-    git("commit", "-q", "-m", f"refactor: rename xhtml files（{len(moves)} 对，纯移动）")
+        f"少 {sorted({t for _, t in moves} - got_to)}"
+    )
+    git(
+        "commit", "-q", "-m", f"refactor: rename xhtml files（{len(moves)} 对，纯移动）"
+    )
     git("add", "-A")
 
 
 def main() -> None:
     parser = triage_parser(__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只分类并写挂起清单，不实际提交")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="只分类并写挂起清单，不实际提交"
+    )
     dry = parser.parse_args().dry_run
     git("add", "-A")  # 统一从「全部暂存」状态出发
-    pairs, ambiguous = repair([(f, t) for f, t in staged_renames()
-                               if t.lower().endswith(TEXT_EXT)])
-    print(f"文本 rename 总数 {len(pairs)}" + (f"，配对歧义 {len(ambiguous)}" if ambiguous else ""))
+    pairs, ambiguous = repair(
+        [(f, t) for f, t in staged_renames() if t.lower().endswith(TEXT_EXT)]
+    )
+    print(
+        f"文本 rename 总数 {len(pairs)}"
+        + (f"，配对歧义 {len(ambiguous)}" if ambiguous else "")
+    )
 
     hm = head_sha_map()
     cf = CatFile()
