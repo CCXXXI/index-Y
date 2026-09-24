@@ -1,21 +1,18 @@
-"""上游上下文导出：commit 记录 + maintenance-records 命中预注，供审查参考。
+"""上游上下文导出：本轮 pin 区间的 commit 记录 + maintenance-records 命中预注，供审查参考。
 
-参考源是同级目录 ../index-X 的本地 clone（全程经 git plumbing 读
-origin/master，不依赖其工作区状态；clone 缺失时静默跳过并清除陈旧产物）。
-记录是上游自报证据，【不免检】：本脚本只做机械层（基准
-commit 定位、片段命中检索），「引文是否真支持改动」的语义判断保留给审查者
+参考源是 index-X submodule（全程经 git plumbing 读，不依赖其工作区状态）。
+区间精确：基准 = superproject HEAD 的 gitlink pin（上轮同步点），
+新侧 = submodule HEAD（本轮 update_x checkout 的 ref）；未起新轮
+（pin == HEAD）时静默跳过并清除陈旧产物。
+记录是上游自报证据，【不免检】：本脚本只做机械层（区间列举、片段命中检索），
+「引文是否真支持改动」的语义判断保留给审查者
 （.agents/skills/sync-triage/SKILL.md §6 上游记录的使用纪律）。
 
 产物（.triage/ 下）：
-- upstream_context.txt：clone 状态、逐卷基准匹配、本轮新 commit 列表
-  （含 body）、范围内新增/修改的 maintenance-records 全文、全部记录索引。
-- review_changes.txt / suspect_changes.txt 块尾预注（★ 前缀行）：块的最小
-  差异片段在全部 records 中检索的命中（prepare_review 的 parse_blocks 跳过）。
-
-基准匹配利用 git tree 哈希的内容寻址：epub 解压树与上游 EPUB/ 目录逐字节
-一致（已实测），HEAD:X/<vol> 与上游某 commit 的 :EPUB/<vol> tree 相等即
-命中。上游 push 可能晚于 zip 发布：旧侧匹配不到时按上次同步日期近似列举，
-新侧不一致时报告「git 滞后于 zip」，两种情况 commit/记录都可能不全。
+- upstream_context.txt：pin 区间、逐卷新 commit 列表（含 body）、区间内
+  新增/修改的 maintenance-records 全文、全部记录索引、政策文件变更。
+- review_changes.txt 块尾预注（★ 前缀行）：块的最小差异片段在全部
+  records 中检索的命中（prepare_review 的 parse_blocks 跳过）。
 --fetch：先 git fetch（起新轮时 run_all 带入）；在途重跑不带，离线幂等。
 用法: uv run python scripts/sync/upstream_context.py [--fetch]
 """
@@ -23,13 +20,20 @@ commit 定位、片段命中检索），「引文是否真支持改动」的语�
 import difflib
 import os
 import re
-import subprocess
 import sys
-from functools import partial
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from commit_image_renames import STATE_DIR
-from lib_triage import ENV, git, repo_root, triage_parser
+from lib_triage import (
+    STATE_DIR,
+    X_PREFIX,
+    git,
+    gitx,
+    pin_sha,
+    status_line_rel,
+    triage_parser,
+    x_changes,
+    x_head,
+)
 
 RECORDS_DIR = "docs/maintenance-records"
 MAX_HIT_RECS = 4  # 每块最多列出的命中记录数
@@ -38,152 +42,47 @@ MAX_LINE = 160  # 命中行截断
 BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
 
 
-def clone_dir() -> str | None:
-    """../index-X 存在且是 git 仓库时返回其路径，否则 None。"""
-    d = os.path.normpath(os.path.join(repo_root(), "..", "index-X"))
-    r = subprocess.run(
-        ["git", "-C", d, "rev-parse", "--git-dir"],
-        capture_output=True,
-        env=ENV,
-        check=False,
-    )
-    return d if r.returncode == 0 else None
+def vol_commits(base: str, head: str, vol: str) -> list[str]:
+    """base..head 中改动过 EPUB/<vol> 的 commit（新→旧）。"""
+    out = gitx("log", "--format=%H", f"{base}..{head}", "--", f"{X_PREFIX}/{vol}")
+    return [l for l in out.decode("utf-8").splitlines() if l]
 
 
-def gitx(clone: str, *args: str) -> bytes:
-    r = subprocess.run(
-        ["git", "-C", clone, *args], capture_output=True, env=ENV, check=False
-    )
-    if r.returncode != 0:
-        raise RuntimeError(
-            f"git -C index-X {' '.join(args)}: "
-            f"{r.stderr.decode('utf-8', 'replace')[:500]}"
-        )
-    return r.stdout
-
-
-def vol_tree(repo_git, ref: str, prefix: str, vol: str) -> str | None:
-    """ref 下 <prefix>/<vol> 目录的 tree sha；不存在返回 None。"""
-    out = repo_git("ls-tree", ref, "--", f"{prefix}/{vol}").decode().split()
-    return out[2] if len(out) >= 3 and out[1] == "tree" else None
-
-
-def changed_vols() -> list[str]:
-    """工作区（含暂存）有在途改动的 X 侧卷名。"""
-    out = git("status", "--porcelain", "-z").decode("utf-8")
-    return sorted(
-        {
-            ent[3:].strip('"').split("/")[1]
-            for ent in out.split("\0")
-            if ent and ent[3:].strip('"').startswith("X/")
-        }
-    )
-
-
-def touching_commits(clone: str, ref: str, vol: str) -> list[str]:
-    """上游 master 上改动过 EPUB/<vol> 的 commit（新→旧）。"""
-    out = gitx(clone, "log", "--format=%H", ref, "--", f"EPUB/{vol}").decode("utf-8")
-    return [l for l in out.splitlines() if l]
-
-
-def find_base(clone: str, ref: str, vol: str, old_tree: str) -> str | None:
-    """最新一个 EPUB/<vol> tree == old_tree 的上游 commit（本轮基准）。"""
-    gx = partial(gitx, clone)
-    for sha in touching_commits(clone, ref, vol):
-        if vol_tree(gx, sha, "EPUB", vol) == old_tree:
-            return sha
-    return None
-
-
-def commit_brief(clone: str, sha: str) -> tuple[str, str, str]:
+def commit_brief(sha: str) -> tuple[str, str, str]:
     """(短 sha, 日期, subject+body)。body 原样保留（上游的差异摘要）。"""
-    out = gitx(clone, "show", "-s", "--format=%h %cI%n%B", sha).decode("utf-8")
+    out = gitx("show", "-s", "--format=%h %cI%n%B", sha).decode("utf-8")
     first, _, body = out.partition("\n")
     short, _, date = first.partition(" ")
     return short, date, body.rstrip("\n")
 
 
-def match_vols(clone: str, ref: str, vols: list[str]):
-    """逐卷基准匹配。返回 (行报告, 基准 sha 列表, {vol: [(sha, brief)]})。"""
-    lines, bases, commits = [], [], {}
-    if vols:
-        git("add", "-A")  # 与 triage 各步一致：以暂存态为新侧
-        staged_root = git("write-tree").decode().strip()
-    for vol in vols:
-        old = vol_tree(git, "HEAD", "X", vol)
-        if old is None:
-            lines.append(f"[新卷] {vol}（HEAD 无此卷；上游最新相关 commit 供参考）")
-            commits[vol] = [
-                (s, commit_brief(clone, s))
-                for s in touching_commits(clone, ref, vol)[:3]
-            ]
-            continue
-        base = find_base(clone, ref, vol, old)
-        if base is None:
-            date = (
-                git("log", "-1", "--format=%cI", "HEAD", "--", f"X/{vol}")
-                .decode("utf-8")
-                .strip()
-            )
-            near = [
-                s
-                for s in touching_commits(clone, ref, vol)
-                if commit_brief(clone, s)[1] > date
-            ]
-            lines.append(
-                f"[近似] {vol}：git 中找不到与旧 X 逐字一致的 commit"
-                f"（上轮 zip 领先 push？），按上次同步日期 {date[:10]}"
-                " 近似列举，可能不全"
-            )
-            commits[vol] = [(s, commit_brief(clone, s)) for s in near]
-            continue
-        bases.append(base)
-        touch = touching_commits(clone, ref, vol)
-        new_shas = touch[: touch.index(base)]  # base 由 touching 列表得来，必在
-        new_tree = vol_tree(git, staged_root, "X", vol)
-        gx = partial(gitx, clone)
-        lag = (
-            ""
-            if vol_tree(gx, ref, "EPUB", vol) == new_tree
-            else (
-                "；⚠ origin/master 与 zip 新内容不一致（上游 push 晚于 zip："
-                "commit/记录可能不全）"
-            )
-        )
-        lines.append(f"[OK] {vol}：基准 {base[:8]}，新 commit {len(new_shas)} 条{lag}")
-        commits[vol] = [(s, commit_brief(clone, s)) for s in new_shas]
-    return lines, bases, commits
+def changed_vols() -> list[str]:
+    """本轮在途改动涉及的卷（X 侧 pin..HEAD ∪ Y 侧工作区）。"""
+    vols = set()
+    for _st, rel, old in x_changes():
+        vols.add(rel.split("/")[0])
+        if old:
+            vols.add(old.split("/")[0])
+    for line in git("status", "--porcelain").decode("utf-8").splitlines():
+        rel = status_line_rel(line)
+        if rel is not None:
+            vols.add(rel.split("/")[0])
+    return sorted(vols)
 
 
-def records_index(clone: str, ref: str) -> list[str]:
-    out = gitx(clone, "ls-tree", "-r", "--name-only", ref, "--", RECORDS_DIR).decode(
-        "utf-8"
-    )
+def records_index(head: str) -> list[str]:
+    out = gitx("ls-tree", "-r", "--name-only", head, "--", RECORDS_DIR).decode("utf-8")
     return [l for l in out.splitlines() if l.endswith(".md")]
 
 
-def record_text(clone: str, ref: str, path: str) -> str:
-    return gitx(clone, "show", f"{ref}:{path}").decode("utf-8")
+def record_text(head: str, path: str) -> str:
+    return gitx("show", f"{head}:{path}").decode("utf-8")
 
 
-def oldest_base(clone: str, ref: str, bases: list[str]) -> str:
-    return max(
-        bases, key=lambda b: int(gitx(clone, "rev-list", "--count", f"{b}..{ref}"))
-    )
-
-
-def changed_records(clone: str, ref: str, bases: list[str]) -> list[str]:
-    """范围内（最早基准..master）新增/修改的 record 路径。"""
-    if not bases:
-        return []
+def changed_records(base: str, head: str) -> list[str]:
+    """pin 区间内新增/修改的 record 路径。"""
     out = gitx(
-        clone,
-        "log",
-        "--format=",
-        "--name-status",
-        f"{oldest_base(clone, ref, bases)}..{ref}",
-        "--",
-        RECORDS_DIR,
+        "log", "--format=", "--name-status", f"{base}..{head}", "--", RECORDS_DIR
     ).decode("utf-8")
     seen: list[str] = []
     for l in out.splitlines():
@@ -194,15 +93,12 @@ def changed_records(clone: str, ref: str, bases: list[str]) -> list[str]:
     return seen
 
 
-def policy_changes(clone: str, ref: str, bases: list[str]) -> list[str]:
-    if not bases:
-        return []
+def policy_changes(base: str, head: str) -> list[str]:
     out = gitx(
-        clone,
         "log",
         "--format=",
         "--name-only",
-        f"{oldest_base(clone, ref, bases)}..{ref}",
+        f"{base}..{head}",
         "--",
         "AGENTS.md",
         ".agents",
@@ -302,38 +198,43 @@ def annotate(path: str, corpus: dict[str, str]) -> int:
 def main() -> int:
     parser = triage_parser(__doc__)
     parser.add_argument(
-        "--fetch", action="store_true", help="先 git fetch ../index-X（起新轮时用）"
+        "--fetch", action="store_true", help="先 git fetch index-X（起新轮时用）"
     )
     args = parser.parse_args()
     os.makedirs(STATE_DIR, exist_ok=True)
     ctx_path = os.path.join(STATE_DIR, "upstream_context.txt")
 
-    clone = clone_dir()
-    if clone is None:
+    if args.fetch:
+        print("fetch index-X ...", flush=True)
+        gitx("fetch", "-q", "--tags", "--force", "origin")
+    base, head = pin_sha(), x_head()
+    if base == head:
         if os.path.exists(ctx_path):
             os.remove(ctx_path)  # 防陈旧文件被误当本轮材料
-        print("../index-X 不存在，跳过上游上下文导出")
+        print("pin 未推进（未起新轮），跳过上游上下文导出")
         return 0
-    if args.fetch:
-        print("fetch ../index-X ...", flush=True)
-        gitx(clone, "fetch", "--quiet", "origin")
-    ref = gitx(clone, "rev-parse", "origin/master").decode("utf-8").strip()
 
     vols = changed_vols()
-    lines, bases, commits = match_vols(clone, ref, vols)
-    recs = records_index(clone, ref)
-    corpus = {p: record_text(clone, ref, p) for p in recs}
-    new_recs = changed_records(clone, ref, bases)
-    policies = policy_changes(clone, ref, bases)
+    commits = {
+        v: [(s, commit_brief(s)) for s in vol_commits(base, head, v)] for v in vols
+    }
+    recs = records_index(head)
+    corpus = {p: record_text(head, p) for p in recs}
+    new_recs = changed_records(base, head)
+    policies = policy_changes(base, head)
+    master = gitx("rev-parse", "origin/master").decode().strip()
+    ahead = gitx("rev-list", "--count", f"{head}..{master}").decode().strip()
 
+    tags = gitx("tag", "--points-at", head).decode().split()
     w = [
-        f"# 上游上下文（clone: ../index-X @ origin/master {ref[:8]}）",
+        f"# 上游上下文（index-X pin 区间 {base[:8]}..{head[:8]}"
+        + (f"，tag {max(tags)}" if tags else "")
+        + "）",
         "# 记录是上游自报证据，不免检：机械比对已做，",
         "# 「引文→改动」的语义支持关系仍需审查者逐条判断。",
-        "",
-        "## 基准匹配",
     ]
-    w += lines or ["（无在途改动卷）"]
+    if ahead != "0":
+        w.append(f"# 注：origin/master 领先本轮同步点 {ahead} 个 commit（属下轮内容）")
     w += ["", "## 本轮新 commit"]
     any_commit = False
     for vol in vols:
@@ -347,13 +248,13 @@ def main() -> int:
             w.append("")
     if not any_commit:
         w.append("（无）")
-    w += ["", f"## maintenance-records 变更（范围内 {len(new_recs)} 篇）"]
+    w += ["", f"## maintenance-records 变更（区间内 {len(new_recs)} 篇）"]
     for p in new_recs:
         w += [f"===== {p} =====", corpus.get(p, ""), ""]
     w += ["", "## 全部记录索引（块级 ★ 预注的检索范围）"]
     w += [f"- {p}" for p in recs]
     if policies:
-        w += ["", "## 政策文件变更（AGENTS.md/.agents，范围内）"]
+        w += ["", "## 政策文件变更（AGENTS.md/.agents，区间内）"]
         w += [f"- {p}" for p in policies]
     with open(ctx_path, "w", encoding="utf-8") as f:
         f.write("\n".join(w) + "\n")
@@ -363,10 +264,9 @@ def main() -> int:
         f"records 变更 {len(new_recs)} 篇）"
     )
 
-    for name in ("review_changes.txt", "suspect_changes.txt"):
-        n = annotate(os.path.join(STATE_DIR, name), corpus)
-        if n:
-            print(f"{name}: {n} 块命中上游记录（★ 预注）")
+    n = annotate(os.path.join(STATE_DIR, "review_changes.txt"), corpus)
+    if n:
+        print(f"review_changes.txt: {n} 块命中上游记录（★ 预注）")
     return 0
 
 

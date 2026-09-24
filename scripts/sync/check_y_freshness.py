@@ -8,12 +8,13 @@
 import os
 import sys
 
-from lib_triage import TEXT_EXT, repo_root, triage_parser
+from lib_triage import TEXT_EXT, ensure_x, repo_root, triage_parser
 from x2y import fixed
 
 
 def main() -> int:
     triage_parser(__doc__).parse_args()
+    ensure_x()  # submodule init + X/ 联接（幂等）
     root = repo_root()
     stale = []
     for vol in sorted(os.listdir(os.path.join(root, "X"))):

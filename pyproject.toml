@@ -15,3 +15,10 @@ dev = [
     "ruff>=0.14.9",
     "ty>=0.0.3",
 ]
+
+# index-X 是上游仓库的 submodule，其内容不入本仓 lint/type 范围
+[tool.ruff]
+extend-exclude = ["index-X"]
+
+[tool.ty.src]
+exclude = ["index-X"]

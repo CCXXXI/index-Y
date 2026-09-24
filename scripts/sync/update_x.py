@@ -1,54 +1,62 @@
-"""同步上游 X 版的完整流程：
+"""同步上游 X：index-X submodule fetch 后 checkout 到 release tag（或指定 ref），重跑 x2y。
 
-1. 解压 zip，找到其中所有 epub（支持完整下载或部分挑选两种情况）；
-2. 每个 epub 解压后整体替换 X/ 下的同名文件夹——旧版先整个删除，
-   防止上游文件改名或删除后残留旧文件；
-3. 全部替换完成后重跑 x2y.py 重新生成 Y/。
+上游每天对 EPUB/ 改动 force-push 日期 tag（YYYY.MM.DD）并发布 release；
+默认对齐最新 tag（与发布制品语义同构），--ref 可指定其他 ref
+（如 origin/master 追最尖、或历史 tag 复现）。
+preflight（ensure_x）：submodule 未初始化则 init，X/ 联接与 override stub 缺失则补建。
+门控：submodule 工作区必须干净；submodule HEAD ≠ pin 时警告（上轮同步在途，继续
+将顶掉在途审查——确认强行并入才手动跑本脚本；run_all 已先行拒绝）。
+用法: uv run python scripts/sync/update_x.py [--ref REF]
 """
 
-import argparse
-import shutil
+import os
 import sys
-import tempfile
-import zipfile
-from pathlib import Path
 
-from tqdm import tqdm
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lib_triage import (
+    assert_x_clean,
+    ensure_x,
+    gitx,
+    pin_sha,
+    set_sync_ref,
+    triage_parser,
+    x_head,
+)
 from x2y import x2y
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+def latest_tag() -> str:
+    """最新 release tag（YYYY.MM.DD 字典序 == 日期序）。"""
+    tags = sorted(t for t in gitx("tag", "-l", "20*").decode().split() if t)
+    if not tags:
+        sys.exit("错误：index-X 中找不到日期 tag（20*）")
+    return tags[-1]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    parser = triage_parser(__doc__)
+    parser.add_argument(
+        "--ref",
+        default=None,
+        help="上游 ref（tag/分支/sha）；默认最新 release tag",
     )
-    parser.add_argument("zip", type=Path, help="上游下载的 zip 路径")
     args = parser.parse_args()
-    zip_path: Path = args.zip
-    x_dir = REPO_ROOT / "X"
+    ensure_x()
+    assert_x_clean()
+    if x_head() != pin_sha():
+        print(
+            "警告：submodule HEAD 已离开 pin（上轮同步在途），继续将顶掉在途审查",
+            flush=True,
+        )
 
-    with zipfile.ZipFile(zip_path) as outer:
-        epubs = [n for n in outer.namelist() if n.lower().endswith(".epub")]
-        if not epubs:
-            sys.exit(f"错误：{zip_path} 中没有 epub 文件")
-
-        for name in tqdm(epubs, "解压"):
-            vol = Path(name).stem
-            target = x_dir / vol
-            # 先解压到仓库内的临时目录（.gitignore 排除）并校验，确认无误后
-            # 再替换；与 X/ 同卷可直接 move，且避免解压失败时旧版已被删除
-            with tempfile.TemporaryDirectory(dir=REPO_ROOT, prefix=".update-x-") as tmp:
-                staging = Path(tmp) / "extract"
-                with outer.open(name) as f, zipfile.ZipFile(f) as epub:
-                    epub.extractall(staging)
-                if not (staging / "mimetype").is_file():
-                    sys.exit(f"错误：{name} 不是有效的 epub（缺少 mimetype），已中止")
-                existed = target.exists()
-                if existed:
-                    shutil.rmtree(target)
-                shutil.move(str(staging), target)
-
+    print("fetch index-X ...", flush=True)
+    gitx("fetch", "-q", "--tags", "--force", "origin")
+    ref = args.ref or latest_tag()
+    sha = gitx("rev-parse", ref).decode().strip()
+    gitx("checkout", "-q", sha)
+    tags = gitx("tag", "--points-at", "HEAD").decode().split()
+    set_sync_ref(max(tags) if tags else sha[:10])
+    print(f"index-X: {pin_sha()[:10]} -> {sha[:10]}（{ref}）", flush=True)
     x2y()
 
 

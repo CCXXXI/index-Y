@@ -1,26 +1,23 @@
 """一键跑完自动分流流程，代替按文档逐条执行各步脚本。
 
-默认（人工审查前）：check_y_freshness 前置校验 → 图片重命名/引用/纯格式化/
-版式四批提交 → triage_text 分类导出审查材料 → export_rule_candidates →
-report_inactive_rules。
-带 zip 时先跑 update_x.py（上游入仓）再接默认流程——要求工作区干净，
-上轮未收尾会被拒绝（在途审查会被新版顶掉）；另校验 HEAD 自洽
-（Y == x2y(X)），拦上轮改 rules/ 后漏跑 x2y.py 的陈旧 Y；在途分流中
-重跑不带 zip。
---finish（人工审查后）：triage_text --commit（原子提交）→
-report_inactive_rules 收尾。
+默认（人工审查前）：check_y_freshness 前置校验 → triage_text 导出审查
+材料（Y 侧文本块 diff）→ upstream_context（pin 区间记录 + ★ 预注）。
+--sync 时先跑 update_x.py（index-X submodule checkout 上游 ref 起新轮）再接
+默认流程——要求工作区干净且 submodule HEAD == pin，上轮未收尾会被拒绝
+（在途审查会被新版顶掉）；另校验 HEAD 自洽（Y == x2y(X)），拦上轮改 rules/
+后漏跑 x2y.py 的陈旧 Y；在途分流中重跑不带 --sync。
+--finish（人工审查后）：check_y_freshness → triage_text --commit（原子提交）。
 
 任一脚本失败即中止。各步骤本身幂等，可整体重跑。
-用法: uv run python scripts/sync/run_all.py [上游.zip] [--finish]
+用法: uv run python scripts/sync/run_all.py [--sync [REF]] [--finish]
 """
 
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import triage_parser
+from lib_triage import ensure_x, pin_sha, triage_parser, x_head
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,8 +31,8 @@ def run(script: str, *args: str) -> None:
         raise SystemExit(f"{script} 失败（exit {r.returncode}），中止")
 
 
-def update_x(zip_path: Path) -> None:
-    """上游 zip 入仓前置：工作区必须干净，否则在途审查会被新版顶掉。
+def update_x(ref: str | None) -> None:
+    """起新轮前置：工作区必须干净、submodule 已在 pin 上，否则在途审查会被新版顶掉。
 
     跨轮残留本身是安全的（.agents/skills/sync-triage/SKILL.md），此 gate 防的是白费在途
     审查与一轮混入两个上游 delta；确认要强行并入可手动跑 update_x.py。
@@ -50,12 +47,15 @@ def update_x(zip_path: Path) -> None:
         raise SystemExit(
             "错误：工作区有未提交改动，拒绝并入新上游（上轮未收尾，在途审查"
             "会被新版顶掉）。先 --finish 收尾；确认放弃在途审查则手动运行 "
-            "uv run python scripts/sync/update_x.py <zip>"
+            "uv run python scripts/sync/update_x.py"
         )
-    if not zip_path.is_file():
-        raise SystemExit(f"错误：zip 不存在：{zip_path}")
+    if x_head() != pin_sha():
+        raise SystemExit(
+            "错误：submodule HEAD 已离开 pin（上轮在途），拒绝再并入。先 --finish "
+            "收尾；确认放弃在途审查则手动运行 uv run python scripts/sync/update_x.py"
+        )
     # HEAD 自洽门控：工作区干净时等价于校验 HEAD——上轮改 rules/ 后漏跑
-    # x2y.py 会留下陈旧 Y，本轮重跑 x2y 会把规则补渲染当「仅 Y 改动」混进审查
+    # x2y.py 会留下陈旧 Y，本轮重跑 x2y 会把规则补渲染混进审查
     print("\n===== check_y_freshness.py（HEAD 自洽门控） =====", flush=True)
     r = subprocess.run(
         [sys.executable, os.path.join(SCRIPTS, "check_y_freshness.py")], check=False
@@ -65,41 +65,38 @@ def update_x(zip_path: Path) -> None:
             "HEAD 的 X/Y/rules 不自洽（上轮改 rules/ 后漏跑 x2y.py？）。先重跑 "
             "uv run python scripts/sync/x2y.py，把 Y 侧规则效果提交，再开始新一轮"
         )
-    run("update_x.py", str(zip_path))
+    run("update_x.py", *(["--ref", ref] if ref else []))
 
 
 def main() -> None:
     parser = triage_parser(__doc__)
     parser.add_argument(
-        "zip", nargs="?", type=Path, help="上游下载的 zip；提供时先运行 update_x 起新轮"
+        "--sync",
+        nargs="?",
+        const="",
+        metavar="REF",
+        help="起新轮：先运行 update_x（index-X checkout 上游 ref；缺省最新 release tag）",
     )
     parser.add_argument(
         "--finish",
         action="store_true",
-        help="人工审查后收尾：triage_text --commit → report_inactive_rules",
+        help="人工审查后收尾：check_y_freshness → triage_text --commit",
     )
     args = parser.parse_args()
+    ensure_x()
     if args.finish:
-        if args.zip is not None:
-            parser.error("--finish 不接受 zip 参数")
+        if args.sync is not None:
+            parser.error("--finish 不接受 --sync 参数")
         run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
         run("triage_text.py", "--commit")
-        run("report_inactive_rules.py")
         return
-    if args.zip is not None:
-        update_x(args.zip)
+    if args.sync is not None:
+        update_x(args.sync or None)
     run("check_y_freshness.py")
-    run("commit_image_renames.py")
-    run("commit_image_refs.py")
-    run("commit_xhtml_renames.py")
-    run("commit_pure_formatting.py")
-    run("commit_layout.py")
     run("triage_text.py")
     # 上游上下文（commit/记录预注）须在 triage_text 之后：预注基于其刚覆写
     # 的审查材料；起新轮时带 --fetch，在途重跑离线复用
-    run("upstream_context.py", *(["--fetch"] if args.zip else []))
-    run("export_rule_candidates.py")
-    run("report_inactive_rules.py")
+    run("upstream_context.py", *(["--fetch"] if args.sync is not None else []))
 
 
 if __name__ == "__main__":

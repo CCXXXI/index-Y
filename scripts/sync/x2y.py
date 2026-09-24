@@ -17,6 +17,9 @@ from pathlib import Path
 import regex as re
 from tqdm import tqdm
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_triage import ensure_x
+
 ROOT = Path(__file__).parent.parent.parent
 RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
@@ -90,6 +93,7 @@ def fixed(vol: str, content: str) -> str:
 
 
 def x2y():
+    ensure_x()  # submodule init + X/ 联接 + override stub（幂等）
     x, y = ROOT / "X", ROOT / "Y"
     if y.exists():  # 只豁免「不存在」；占用/只读等删除错误保持响亮失败
         shutil.rmtree(y)
