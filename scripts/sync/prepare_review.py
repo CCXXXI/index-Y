@@ -316,7 +316,7 @@ def main() -> int:
         print(f"原文 {vol} -> {os.path.relpath(p, root)}")
     xdirs = {
         d.split("]")[0].strip("["): d
-        for d in os.listdir(os.path.join(root, "X"))
+        for d in os.listdir(os.path.join(root, "index-X", "EPUB"))
         if d.startswith("[")
     }
     exempt = exempt_vols(os.path.normpath(os.path.join(root, JP_REPO)))

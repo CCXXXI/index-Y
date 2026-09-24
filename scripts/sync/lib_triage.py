@@ -97,8 +97,7 @@ class CatFile:
 
 # ---------- X 侧（submodule index-X）----------
 # index-X 是上游仓库的 submodule（pin = superproject HEAD 的 gitlink，即上轮
-# 同步点）；X/ 是指向 index-X/EPUB 的便利联接（junction/symlink，gitignored，
-# ensure_x preflight 自动创建）。X 侧「旧」= pin，「新」= submodule HEAD，
+# 同步点），X 语料即其 EPUB/ 树。X 侧「旧」= pin，「新」= submodule HEAD，
 # 轮内恒定（无任何批次记账）；轮末 triage_text --commit 推进 gitlink pin。
 X_REPO = "index-X"
 X_PREFIX = "EPUB"
@@ -183,36 +182,11 @@ def clear_sync_ref() -> None:
 
 
 def ensure_x() -> None:
-    """X 读取前提（幂等 preflight）：submodule 已初始化、X/ 联接就位、
+    """X 读取前提（幂等 preflight）：submodule 已初始化、
     上游上下文注入的 override stub 在位。"""
     root = repo_root()
-    epub = os.path.join(root, X_REPO, X_PREFIX)
-    if not os.path.isdir(epub):
+    if not os.path.isdir(os.path.join(root, X_REPO, X_PREFIX)):
         git("submodule", "update", "--init", X_REPO)
-    x = os.path.join(root, "X")
-    if not (os.path.isdir(x) and os.path.samefile(x, epub)):
-        if os.path.lexists(x):
-            raise SystemExit(f"{x} 已存在且不是指向 index-X/EPUB 的联接，人工处理")
-        target = os.path.join(X_REPO, X_PREFIX)
-        if os.name == "nt":  # junction 无需管理员/开发者模式
-            subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    (
-                        f"New-Item -ItemType Junction -Path '{x}' "
-                        f"-Target '{target}' | Out-Null"
-                    ),
-                ],
-                cwd=root,
-                check=True,
-            )
-        else:
-            os.symlink(target, x)
-        # PowerShell 的非终止错误 exit 0 会静默失败，事后验证联接真实可用
-        if not (os.path.isdir(x) and os.path.samefile(x, epub)):
-            raise SystemExit(f"联接创建失败：{x} -> {target}，人工创建后重跑")
     stub = os.path.join(root, X_REPO, "AGENTS.override.md")
     if not os.path.exists(stub):
         with open(stub, "w", encoding="utf-8") as f:
@@ -239,7 +213,7 @@ def hold_path() -> str:
 
 
 def read_hold() -> dict[str, str]:
-    """挂起清单：rel（不带 X/、Y/ 前缀）-> 理由。# 开头为注释。"""
+    """挂起清单：rel（不带 EPUB/ 前缀）-> 理由。# 开头为注释。"""
     out: dict[str, str] = {}
     if not os.path.exists(hold_path()):
         return out
@@ -254,12 +228,12 @@ def read_hold() -> dict[str, str]:
 
 
 def status_line_rel(line: str) -> str | None:
-    """git status --porcelain 行 → rel（去 X/、Y/ 前缀；rename 取新路径）。"""
+    """git status --porcelain 行 → rel（去 EPUB/ 前缀；rename 取新路径）。"""
     p = line[3:]
     if " -> " in p:
         p = p.split(" -> ", 1)[1]
     p = p.strip('"')
-    return p[2:] if p.startswith(("X/", "Y/")) else None
+    return p[5:] if p.startswith("EPUB/") else None
 
 
 def prune_hold() -> list[str]:
@@ -276,8 +250,8 @@ def prune_hold() -> list[str]:
             i += 1
             continue
         st, p = e[0], e[3:]
-        if p.startswith("Y/"):
-            y_pending.add(p[2:])
+        if p.startswith("EPUB/"):
+            y_pending.add(p[5:])
         i += 2 if st == "R" else 1  # status -z rename 为 to\0from，跳过 from
     stale = {r for r in read_hold() if r not in y_pending}
     if not stale:

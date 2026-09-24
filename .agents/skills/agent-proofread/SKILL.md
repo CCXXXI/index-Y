@@ -32,7 +32,7 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 - 候选规则写 TSV（`旧<TAB>新<TAB>注释` 三列，注释含原文依据；旧串为 X 侧 xhtml 逐字，ruby 标签内联）。
 - `uv run python scripts/agent_proofread/apply_rules.py <卷> candidates.tsv [--replace 旧串]...`：归属计数（全语料命中跨卷即报错交裁决——**裁决口径：默认顺带一并改**，各命中点逐条回原文确认同译无害后提升 _common 或逐卷落规则；仅当别卷命中不宜改时才加长旧串限本卷）、正则守卫、双模拟，全过才写 TSV。
 - 重跑 `uv run python scripts/sync/x2y.py`，`--verify-y` 终验；`git diff` 应为纯行内替换（+N/−N 相等）。
-- rules/ 与 Y/ 同一 commit：`fix: 校正 <卷标识>（N 处文本修订）`，body 附全量 `旧→新`。
+- rules/ 与 EPUB/ 同一 commit：`fix: 校正 <卷标识>（N 处文本修订）`，body 附全量 `旧→新`。
 - **登记 `status.md`**（本 skill 目录下同名文件）：更新该卷「本项目」列为日期（提交号，修订处数），随本批改动一起提交。
 
 ## 经验

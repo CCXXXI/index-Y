@@ -40,12 +40,14 @@ def strip_cn(line: str) -> str:
 def resolve_text_dir(vol_arg: str) -> tuple[str, Path]:
     matches = [
         d.name
-        for d in (ROOT / "Y").iterdir()
+        for d in (ROOT / "EPUB").iterdir()
         if d.is_dir() and d.name.startswith(vol_arg)
     ]
     if len(matches) != 1:
-        sys.exit(f"卷参数 {vol_arg!r} 在 Y/ 下匹配到 {len(matches)} 个目录: {matches}")
-    text_dir = ROOT / "Y" / matches[0] / "OEBPS" / "Text"
+        sys.exit(
+            f"卷参数 {vol_arg!r} 在 EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
+        )
+    text_dir = ROOT / "EPUB" / matches[0] / "OEBPS" / "Text"
     if not text_dir.is_dir():
         sys.exit(f"正文目录不存在: {text_dir}")
     return matches[0], text_dir

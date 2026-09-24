@@ -8,10 +8,10 @@
 
 对每条关键词输出：
 
-- X/ 全语料计数（按卷分组）——唯一命中入分卷段，多卷复现入 `_common.tsv`；
-- 目标卷 X/ 与 Y/ 的命中上下文（保留 xhtml 标签原文，供规则旧串逐字截取）；
+- X 侧全语料计数（按卷分组）——唯一命中入分卷段，多卷复现入 `_common.tsv`；
+- 目标卷 X 与 Y 的命中上下文（保留 xhtml 标签原文，供规则旧串逐字截取）；
 - 日文原文侧命中上下文（剥 `<rt>` 注音、去标签、归并空白后搜索，
-  原文卷目录按 `[Sx_yy]` 前缀与 X/ 卷目录对应）。
+  原文卷目录按 `[Sx_yy]` 前缀与 index-X/EPUB/ 卷目录对应）。
 
 用法：uv run python scripts/proofreading_locate.py "[S2_01]新约 某魔法的禁书目录 01X" needles.txt
 卷参数可只给 `[Sx_yy]` 前缀；原文仓库默认 ../index-jp，用 --jp-root 覆盖。
@@ -48,12 +48,14 @@ def parse_needles(path: Path) -> list[Needle]:
 
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
-    """卷参数支持全名或 `[Sx_yy]` 前缀，须唯一匹配 X/ 下卷目录。"""
+    """卷参数支持全名或 `[Sx_yy]` 前缀，须唯一匹配 index-X/EPUB/ 下卷目录。"""
     matches = [
         d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
     ]
     if len(matches) != 1:
-        sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
+        sys.exit(
+            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
+        )
     return matches[0]
 
 
@@ -118,7 +120,7 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("vol", help="目标卷（X/ 下卷目录全名或 [Sx_yy] 前缀）")
+    p.add_argument("vol", help="目标卷（index-X/EPUB/ 下卷目录全名或 [Sx_yy] 前缀）")
     p.add_argument("needles", type=Path, help="关键词清单文件（UTF-8）")
     p.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
     p.add_argument(
@@ -134,8 +136,8 @@ def main() -> None:
     needles = parse_needles(args.needles)
     if not needles:
         sys.exit(f"{args.needles}: 关键词清单为空")
-    vol = resolve_vol(args.vol, ROOT / "X")
-    count_root = ROOT / "X" if args.side == "both" else ROOT / "Y"
+    vol = resolve_vol(args.vol, ROOT / "index-X" / "EPUB")
+    count_root = ROOT / "index-X" / "EPUB" if args.side == "both" else ROOT / "EPUB"
     counts = corpus_counts(count_root, needles)
 
     for n in needles:
@@ -153,10 +155,14 @@ def main() -> None:
             print(f"  [计数] Y 全语料 {total} 次")
         for k, c in per_file.items():
             print(f"         {k} x{c}")
-        sides = ("X", "Y") if args.side == "both" else ("Y",)
-        for side in sides:
-            for hit in vol_contexts(ROOT / side, vol, n.cn):
-                print(f"  [{side}] {hit}")
+        sides = (
+            (("X", ROOT / "index-X" / "EPUB"), ("Y", ROOT / "EPUB"))
+            if args.side == "both"
+            else (("Y", ROOT / "EPUB"),)
+        )
+        for label, side_root in sides:
+            for hit in vol_contexts(side_root, vol, n.cn):
+                print(f"  [{label}] {hit}")
         if n.jp:
             for hit in jp_contexts(args.jp_root, vol, n.jp):
                 print(f"  [JP] {hit}")

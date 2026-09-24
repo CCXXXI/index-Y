@@ -3,7 +3,7 @@
 上游每天对 EPUB/ 改动 force-push 日期 tag（YYYY.MM.DD）并发布 release；
 默认对齐最新 tag（与发布制品语义同构），--ref 可指定其他 ref
 （如 origin/master 追最尖、或历史 tag 复现）。
-preflight（ensure_x）：submodule 未初始化则 init，X/ 联接与 override stub 缺失则补建。
+preflight（ensure_x）：submodule 未初始化则 init，override stub 缺失则补建。
 门控：submodule 工作区必须干净；submodule HEAD ≠ pin 时警告（上轮同步在途，继续
 将顶掉在途审查——确认强行并入才手动跑本脚本；run_all 已先行拒绝）。
 用法: uv run python scripts/sync/update_x.py [--ref REF]

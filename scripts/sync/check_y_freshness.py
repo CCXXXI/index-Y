@@ -14,11 +14,11 @@ from x2y import fixed
 
 def main() -> int:
     triage_parser(__doc__).parse_args()
-    ensure_x()  # submodule init + X/ 联接（幂等）
+    ensure_x()  # submodule init + override stub（幂等）
     root = repo_root()
     stale = []
-    for vol in sorted(os.listdir(os.path.join(root, "X"))):
-        vol_dir = os.path.join(root, "X", vol)
+    for vol in sorted(os.listdir(os.path.join(root, "index-X", "EPUB"))):
+        vol_dir = os.path.join(root, "index-X", "EPUB", vol)
         if not os.path.isdir(vol_dir):
             continue
         for dirpath, _, files in os.walk(vol_dir):
@@ -26,8 +26,8 @@ def main() -> int:
                 if not name.lower().endswith(TEXT_EXT):
                     continue
                 xp = os.path.join(dirpath, name)
-                rel = os.path.relpath(xp, os.path.join(root, "X"))
-                yp = os.path.join(root, "Y", rel)
+                rel = os.path.relpath(xp, os.path.join(root, "index-X", "EPUB"))
+                yp = os.path.join(root, "EPUB", rel)
                 if not os.path.exists(yp):
                     stale.append((rel, "Y 缺失"))
                     continue

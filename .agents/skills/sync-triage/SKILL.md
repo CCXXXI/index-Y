@@ -45,8 +45,7 @@ uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + r
 `hold.txt`、`review_changes.txt`、`upstream_context.txt`、`sync_ref`，其余均为审查草稿。
 
 **数据模型**：`index-X/` 是上游仓库的 submodule（pin = superproject HEAD 的 gitlink，
-即上轮同步点）；`X/` 是指向 `index-X/EPUB` 的便利联接（junction/symlink，gitignored，
-`ensure_x` preflight 自动创建）。X 侧「旧」= pin，「新」= submodule HEAD，轮内恒定。
+即上轮同步点），X 语料即其 `EPUB/` 树。X 侧「旧」= pin，「新」= submodule HEAD，轮内恒定。
 
 **审查材料按构造只有上游驱动改动**：校对提交的 rules/ 与 Y 侧规则效果同 commit 入仓
 （HEAD 自洽），轮末 freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` =
@@ -122,13 +121,13 @@ HEAD 自洽不受影响，可不走 stash：直接重跑 x2y，规则单独成 c
 - **按路径提交**：分流在途期间索引长期保持大量暂存，任何提交（含文档/脚本这类无关提交）都必须带路径限定（`git commit -m msg -- <paths>`），否则裸 `git commit` 会把全部在途暂存卷进去。工作区恢复同理：`git checkout -- <path>` 从索引恢复（拿到的是已暂存的改动），要从 HEAD 恢复用 `git checkout HEAD -- <path>`。
 - **Python 侧路径匹配**：`glob` 会把卷目录名的 `[S1_01]` 当字符类，静默匹配 0 个文件（检索假阴性）；遍历用 `os.listdir`/`os.walk` 或先 `glob.escape`。
 - **Python 生成清单喂 bash 循环**：Windows 文本模式写出 `\r\n`，`while read` 读入的路径带尾 `\r`，git 路径匹配全部失败；先 `tr -d '\r'`，或全程在 Python 内处理。
-- **cwd 漂移**：terminal 会话的 cwd 跨调用保持，`cd` 进相邻仓库后 `git show HEAD:X/...` 会作用在错误仓库上（路径不存在时返回该仓库 HEAD 的提交信息而非报错，是假阳性来源）；跑仓库命令前先确认 cwd。Hermes 文件工具的相对路径同样跟随 terminal 实时 cwd。
+- **cwd 漂移**：terminal 会话的 cwd 跨调用保持，`cd` 进相邻仓库后 `git show HEAD:EPUB/...` 会作用在错误仓库上（路径不存在时返回该仓库 HEAD 的提交信息而非报错，是假阳性来源）；跑仓库命令前先确认 cwd。Hermes 文件工具的相对路径同样跟随 terminal 实时 cwd。
 
 ## 2. 审查材料与审查
 
 `review_changes.txt`：Y 侧文本块 diff 按块聚合（相同改动跨文件去重为 `[N次]`），
 每块 `- 旧` / `+ 新` 两行（结构改动为块组多行），块尾 `★` 行是上游记录命中预注。
-写规则需要 X 侧原文时直接在 `X/<卷>/` 检索片段（联接透明可读）。
+写规则需要 X 侧原文时直接在 `index-X/EPUB/<卷>/` 检索片段。
 
 ### 上游错误的规则化
 
@@ -187,14 +186,14 @@ uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原�
 uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用逐字核验 + 导出 suspect/unsure/unlocated
 ```
 
-- 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。缺原文卷由 prepare 机械消费 ../index-jp/no_original.txt（无原文豁免卷清单）后分流：清单内卷豁免对照（任务提示词附豁免判定口径：按语料惯例与流畅度判定、jp 留空），其余缺卷以 X/ 完整目录名报用户补充（照抄目录名，不凭编号回忆卷名；新增豁免登记 no_original.txt——它是豁免清单的唯一权威）。
+- 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。缺原文卷由 prepare 机械消费 ../index-jp/no_original.txt（无原文豁免卷清单）后分流：清单内卷豁免对照（任务提示词附豁免判定口径：按语料惯例与流畅度判定、jp 留空），其余缺卷以 `index-X/EPUB/` 下完整目录名报用户补充（照抄目录名，不凭编号回忆卷名；新增豁免登记 no_original.txt——它是豁免清单的唯一权威）。
 - 兼容规范化块（新旧文本 NFKC 等价，差异仅来自全角/半角等兼容字符形式，如 ＆→&）由 prepare_review 自动判 ok 写入 `verdicts/auto.jsonl`，不进任务块。其余块按 diff 片段形态聚合：≥3 块同形态（同一批量替换波）整簇成一个任务（不拆分），任务 JSON 带 clusters 字段、提示词附簇判定口径（代表块严格对照、成员逐块确认语境、同簇证据共享；像/象类语境敏感替换仍逐块判）。形态 Top 与逐任务簇规模打印供抽查。
 - 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。
 - review_blocks.json 的块 id 是 verdict 的关联键。verdicts/ 非空时 prepare_review 拒绝重建（防在途任务被换底）——triage_text 重新导出材料时已把上轮 `verdicts/`、`review_chunks/`、`review_prompts/` 轮转入 prev/，故拒绝即本轮真在途：先聚合存档本轮 verdict，清空 verdicts/ 再重建。
 
 ## 3. 挂起清单
 
-需暂缓提交的 rel 写入 `.triage/hold.txt`（每行 `相对路径（不带 X/、Y/ 前缀）<TAB>理由`，
+需暂缓提交的 rel 写入 `.triage/hold.txt`（每行 `相对路径（不带 EPUB/ 前缀）<TAB>理由`，
 `#` 开头为注释）：该 rel 的块不进审查材料，`--commit` 跳过其 Y 侧提交（X 侧随 pin
 全量入仓）。失效条目（Y 侧无在途改动）每轮自动剔除。`--commit` 后仅剩挂起改动时
 单列报告并以非零码退出（轮次保持开放，下一轮 `--sync` 仍被 update_x 拒绝）；

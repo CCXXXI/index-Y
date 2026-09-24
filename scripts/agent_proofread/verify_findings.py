@@ -3,7 +3,7 @@
 输入 findings JSON（UTF-8 数组，每条含 file/line/quote，可选 jp_evidence 或 jp），
 逐条验证并输出带结论标记的 JSON：
 
-- 中文引文逐字验证：目标卷 Y/ 对应文件 line ±3 行 raw 匹配；不匹配则剥标签
+- 中文引文逐字验证：目标卷 Y 侧对应文件 line ±3 行 raw 匹配；不匹配则剥标签
   （保留 <rt> 内容）±5 行再匹配——引文跨 ruby 标签或跨行属常见，raw 不匹配≠编造；
 - 日文依据验证：原文语料（默认 ../index-jp，--jp-root 覆盖）剥 <rt>、去标签、
   归并空白后做子串匹配；精确匹配失败再用「读音容忍」正则兜底——原文仓库部分
@@ -59,12 +59,14 @@ def resolve_vol(vol_arg: str, x_dir: Path) -> str:
         d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
     ]
     if len(matches) != 1:
-        sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
+        sys.exit(
+            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
+        )
     return matches[0]
 
 
 def jp_corpus(jp_root: Path, vol: str) -> str:
-    """同卷原文目录名前缀与 X/ 卷目录一致（如 [S1_01]）。"""
+    """同卷原文目录名前缀与 index-X/EPUB/ 卷目录一致（如 [S1_01]）。"""
     prefix = vol.split("]")[0] + "]"
     dirs = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
     if not dirs:
@@ -93,10 +95,10 @@ def main() -> int:
     ap.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
     args = ap.parse_args()
 
-    vol = resolve_vol(args.vol, ROOT / "X")
+    vol = resolve_vol(args.vol, ROOT / "index-X" / "EPUB")
     findings: list[dict] = json.loads(args.findings.read_text(encoding="utf-8-sig"))
-    y_dir = ROOT / "Y" / vol
-    x_dir = ROOT / "X" / vol
+    y_dir = ROOT / "EPUB" / vol
+    x_dir = ROOT / "index-X" / "EPUB" / vol
     jp = (
         jp_corpus(args.jp_root, vol)
         if any(f.get("jp_evidence") or f.get("jp") for f in findings)

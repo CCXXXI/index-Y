@@ -1,7 +1,7 @@
 """X → Y 转换引擎。规则数据在仓库根目录 rules/ 下，代码与数据分离。
 
 规则文件：rules/_common.tsv 为全卷通用段；rules/<卷名>.tsv 为分卷段
-（文件名 = X/ 下的卷目录名，无规则的卷不建文件）。
+（文件名 = index-X/EPUB/ 下的卷目录名，无规则的卷不建文件）。
 格式：首行固定表头 `旧<TAB>新<TAB>注释`，规则行每行 `旧<TAB>新<TAB>注释`
 （旧/新为 regex 源文本；注释为纯文本，可空——此时行尾是 tab，须防编辑器
 吞掉，见 .editorconfig；删除型规则 new 为空）。# 开头为非规则行（禁用规则、
@@ -25,18 +25,18 @@ RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 HEADER = "旧\t新\t注释"
 
-ensure_x()  # preflight：load_rule_records 列 X/ 卷目录，联接须先存在
+ensure_x()  # preflight：load_rule_records 列 index-X/EPUB/ 卷目录，submodule 须先初始化
 
 
 def load_rule_records() -> list[dict]:
     """加载 rules/*.tsv 为规则记录（含出处行号）并校验；异常直接报错退出。"""
-    x_vols = {p.name for p in (ROOT / "X").iterdir() if p.is_dir()}
+    x_vols = {p.name for p in (ROOT / "index-X" / "EPUB").iterdir() if p.is_dir()}
     records = []
     errors = []
     for tsv in sorted(RULES_DIR.glob("*.tsv")):
         section = "*" if tsv.stem == "_common" else tsv.stem
         if section != "*" and section not in x_vols:
-            errors.append(f"{tsv.name}: 文件名与 X/ 下卷目录不对应")
+            errors.append(f"{tsv.name}: 文件名与 index-X/EPUB/ 下卷目录不对应")
         seen = {}
         lines = tsv.read_text(encoding="utf-8-sig").splitlines()
         if not lines or lines[0] != HEADER:
@@ -95,8 +95,8 @@ def fixed(vol: str, content: str) -> str:
 
 
 def x2y():
-    ensure_x()  # submodule init + X/ 联接 + override stub（幂等）
-    x, y = ROOT / "X", ROOT / "Y"
+    ensure_x()  # submodule init + override stub（幂等）
+    x, y = ROOT / "index-X" / "EPUB", ROOT / "EPUB"
     if y.exists():  # 只豁免「不存在」；占用/只读等删除错误保持响亮失败
         shutil.rmtree(y)
     for vol in tqdm(list(x.iterdir()), "x2y"):

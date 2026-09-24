@@ -1,6 +1,6 @@
 """审查材料导出 + 原子提交。
 
-分流模型：X = 上游逐字镜像（index-X@pin 的 EPUB/ 树），Y = x2y(X) 净化产物。
+分流模型：X = 上游逐字镜像（index-X@pin 的 EPUB/ 树），Y = x2y(X) 净化产物（EPUB/）。
 
 审查材料 = Y 侧 HEAD→工作区的文本块 diff。按构造其中只有上游驱动改动：
 校对提交的 rules/ 与 Y 侧规则效果同 commit 入仓（HEAD 自洽），轮末
@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import (
     STATE_DIR,
     TEXT_EXT,
+    X_PREFIX,
     X_REPO,
     CatFile,
     clear_sync_ref,
@@ -123,12 +124,12 @@ def y_status() -> list[tuple[str, str, str | None]]:
             continue
         st, p = e[0], e[3:]
         if st == "R":  # status -z 顺序为 to\0from
-            if p.startswith("Y/"):
-                out.append(("R", p[2:], entries[i + 1]))
+            if p.startswith("EPUB/"):
+                out.append(("R", p[5:], entries[i + 1]))
             i += 2
         else:
-            if p.startswith("Y/"):
-                out.append((st, p[2:], None))
+            if p.startswith("EPUB/"):
+                out.append((st, p[5:], None))
             i += 1
     return out
 
@@ -155,11 +156,11 @@ def collect() -> dict:
             if st == "D":
                 deleted.append(rel)
                 continue
-            if st == "A" or "Y/" + rel not in yhm:
+            if st == "A" or "EPUB/" + rel not in yhm:
                 new_files.append(rel)
                 continue
-            old = cf.read(yhm["Y/" + (old_rel or rel)])
-            with open(os.path.join("Y", rel), "rb") as f:
+            old = cf.read(yhm["EPUB/" + (old_rel or rel)])
+            with open(os.path.join("EPUB", rel), "rb") as f:
                 new = f.read()
             ch = block_changes(old, new)
             if ch:
@@ -179,7 +180,7 @@ def collect() -> dict:
 
 def mirrored(rel: str) -> bool:
     """非文本改动两侧镜像一致（字节相同或两侧同缺）。"""
-    xp, yp = os.path.join("X", rel), os.path.join("Y", rel)
+    xp, yp = os.path.join(X_REPO, X_PREFIX, rel), os.path.join("EPUB", rel)
     xe, ye = os.path.exists(xp), os.path.exists(yp)
     if not xe and not ye:
         return True
@@ -266,16 +267,16 @@ def main() -> None:
             if mirrored(rel):
                 y_auto.add(rel)  # 非文本镜像改动：自动入仓
             else:
-                uncovered.append(f"Y/{rel}（非文本，两侧不一致）")
+                uncovered.append(f"EPUB/{rel}（非文本，两侧不一致）")
         else:
-            uncovered.append(f"Y/{rel}（未入覆盖集）")
+            uncovered.append(f"EPUB/{rel}（未入覆盖集）")
     for line in git("status", "--porcelain").decode("utf-8").splitlines():
         if not line or line[3:].strip('"') == X_REPO:
             continue
         p = line[3:].strip('"')
         if " -> " in p:
             p = p.split(" -> ", 1)[1]
-        if p.startswith("Y/"):
+        if p.startswith("EPUB/"):
             continue  # Y 侧已逐条覆盖核验
         uncovered.append(line)
     if uncovered:
@@ -336,12 +337,12 @@ def main() -> None:
         # rename 旧路径须在 reset 前取（y_status 自带 add -A，会把挂起文件
         # 重新暂存；reset 之后不得再调任何带 add 的助手）
         rename_olds = [
-            f"Y/{old_rel}"
+            f"EPUB/{old_rel}"
             for st, rel, old_rel in y_status()
             if st == "R" and rel in commit_rels and old_rel
         ]
         git("reset", "-q")
-        paths = [X_REPO] + [f"Y/{rel}" for rel in commit_rels] + rename_olds
+        paths = [X_REPO] + [f"EPUB/{rel}" for rel in commit_rels] + rename_olds
         git(
             "add",
             "--pathspec-from-file=-",

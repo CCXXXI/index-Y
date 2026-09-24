@@ -6,7 +6,7 @@
 
 「生效」定义：把该规则从管道（分卷段先于通用段，段内自上而下）中移除后，
 范围内某文本文件的最终输出发生改变；仅命中但被后续规则再收敛的不算生效。
-扫描对象为工作区 X 中的 .xhtml/.opf/.ncx（与 x2y.py 的 TEXT_EXT 一致）。
+扫描对象为工作区 index-X/EPUB 中的 .xhtml/.opf/.ncx（与 x2y.py 的 TEXT_EXT 一致）。
 """
 
 import argparse
@@ -21,7 +21,7 @@ from sync.x2y import load_rule_records
 from tqdm import tqdm
 
 ROOT = Path(__file__).parent.parent
-X_DIR = ROOT / "X"
+X_DIR = ROOT / "index-X" / "EPUB"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 
 if isinstance(sys.stdout, io.TextIOWrapper):
@@ -37,7 +37,7 @@ def pick_volume(arg: str) -> str:
     if len(hits) == 1:
         return hits[0]
     if not hits:
-        sys.exit(f"X/ 下没有匹配「{arg}」的卷目录")
+        sys.exit(f"index-X/EPUB/ 下没有匹配「{arg}」的卷目录")
     sys.exit(f"「{arg}」匹配到多个卷目录：\n" + "\n".join(hits))
 
 
@@ -145,7 +145,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "volume", metavar="卷", help="X/ 下卷目录名或其唯一子串（如 S4_01）"
+        "volume", metavar="卷", help="index-X/EPUB/ 下卷目录名或其唯一子串（如 S4_01）"
     )
     parser.add_argument(
         "chapter",
@@ -163,7 +163,7 @@ def main() -> int:
     ]
     active = scan(vol, files, seq)
 
-    head = f"范围：X/{vol}"
+    head = f"范围：index-X/EPUB/{vol}"
     if args.chapter is not None:
         head += f" 内匹配「{args.chapter}」的 {len(files)} 个文本文件"
     else:

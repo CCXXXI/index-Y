@@ -13,7 +13,7 @@
    x2y 模块再验一遍（等价于 x2y.py 的规则校验 + 真管道终验）。
 
 落盘后：重跑 `uv run python scripts/sync/x2y.py`，再用 --verify-y 对 Y 产物终验，
-rules/ 与 Y/ 同一 commit 提交。
+rules/ 与 EPUB/ 同一 commit 提交。
 
 用法：
   uv run python scripts/agent_proofread/apply_rules.py <卷> candidates.tsv [--replace 旧串]...
@@ -50,16 +50,18 @@ def parse_tsv(path: Path) -> list[tuple[str, str, str]]:
 def resolve_vol(vol_arg: str) -> str:
     matches = [
         d.name
-        for d in (ROOT / "X").iterdir()
+        for d in (ROOT / "index-X" / "EPUB").iterdir()
         if d.is_dir() and d.name.startswith(vol_arg)
     ]
     if len(matches) != 1:
-        sys.exit(f"卷参数 {vol_arg!r} 在 X/ 下匹配到 {len(matches)} 个目录: {matches}")
+        sys.exit(
+            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
+        )
     return matches[0]
 
 
 def corpus_files():
-    for vol_dir in sorted((ROOT / "X").iterdir()):
+    for vol_dir in sorted((ROOT / "index-X" / "EPUB").iterdir()):
         if not vol_dir.is_dir():
             continue
         for p in sorted(vol_dir.rglob("*")):
@@ -100,7 +102,7 @@ def main() -> int:
     if args.verify_y:
         y_text = "".join(
             p.read_text(encoding="utf-8")
-            for p in sorted((ROOT / "Y" / vol).rglob("*"))
+            for p in sorted((ROOT / "EPUB" / vol).rglob("*"))
             if p.is_file() and p.suffix in TEXT_EXT
         )
         fails = [
@@ -171,7 +173,7 @@ def main() -> int:
     vol_rules = [(o, n) for o, n, _ in kept] + [(o, n) for o, n, _ in candidates]
     fired = {o: 0 for o, _, _ in candidates}
     transformed = []
-    for p in sorted((ROOT / "X" / vol).rglob("*")):
+    for p in sorted((ROOT / "index-X" / "EPUB" / vol).rglob("*")):
         if not (p.is_file() and p.suffix in TEXT_EXT):
             continue
         content = p.read_text(encoding="utf-8")
@@ -211,7 +213,7 @@ def main() -> int:
     spec.loader.exec_module(x2y_mod)  # 模块加载即全量规则校验，失败直接退出
     real_text = "\n".join(
         x2y_mod.fixed(vol, p.read_text(encoding="utf-8"))
-        for p in sorted((ROOT / "X" / vol).rglob("*"))
+        for p in sorted((ROOT / "index-X" / "EPUB" / vol).rglob("*"))
         if p.is_file() and p.suffix in TEXT_EXT
     )
     fails = [
