@@ -9,8 +9,8 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 
 ## 判定依据（指针，不复制进本仓库）
 
-- 规范正文：`../index-X/docs/translation-spec.md`——尤其「四、语义与信息」（哪些必判缺陷）与「六、证据边界」（防误报）。
-- 已裁定索引：`../index-X/.agents/skills/translation-term-unification/SKILL.md` §六 + `../index-X/docs/maintenance-records/`——**开工前必读**，已裁定锚点不得翻案。
+- 规范正文：`index-X/docs/translation-spec.md`——尤其「四、语义与信息」（哪些必判缺陷）与「六、证据边界」（防误报）。
+- 已裁定索引：`index-X/.agents/skills/translation-term-unification/SKILL.md` §六 + `index-X/docs/maintenance-records/`——**开工前必读**，已裁定锚点不得翻案。
 
 ## 流程
 

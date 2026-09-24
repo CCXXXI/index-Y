@@ -6,8 +6,8 @@
 - 上游列刷新口径：上游「已校对」以 index-X git log 中该卷的「重新校对」提交 + 后续「复核」提交为准（裁定/术语统一单点触及不算通校）。同步上游时顺手核对：
 
 ```bash
-git -C ../index-X log --oneline -i --grep='重新校对' --format='%h %ad %s' --date=short
-git -C ../index-X log --oneline --format='%h %ad %s' --date=short -- ":(literal)EPUB/<卷目录名>"
+git -C index-X log --oneline -i --grep='重新校对' --format='%h %ad %s' --date=short
+git -C index-X log --oneline --format='%h %ad %s' --date=short -- ":(literal)EPUB/<卷目录名>"
 ```
 
 | 卷 | 卷名 | 上游 AI 校对 | 本项目校对 |
