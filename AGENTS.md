@@ -11,7 +11,7 @@
 - `scripts/agent_proofread/`：agent 通读校对——`plan_chunks.py`（整卷正文切块方案）、`verify_findings.py`（子 agent 发现复核：引文/日文依据逐字验证 + X/Y 比对）、`apply_rules.py`（候选规则落分卷 TSV：归属计数、正则守卫、双模拟）。
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
 - `.agents/skills/`：任务流程 project skills（`hermes skills trust <仓库路径>` 后按需加载）。
-- `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。无原文豁免卷的机器可读清单由其 `no_original.txt` 发布（prepare_review 消费）。
+- `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。无原文豁免卷清单的唯一权威是其 `no_original.txt`（prepare_review 消费）。
 - `../index-X`（同级目录，如存在）：上游仓库的完整本地 clone，只读参考（commit 历史、`docs/maintenance-records/` 改动理由记录、`.agents/` 术语政策）；同步分流时由 `scripts/sync/upstream_context.py` 经 git plumbing 读其 origin/master，不依赖其工作区状态。
 
 不变式：**X 是上游逐字镜像，Y 是 `x2y(X)` 净化产物。**
