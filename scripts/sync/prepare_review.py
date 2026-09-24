@@ -13,13 +13,22 @@
 
 另打印重复片段形态 Top（同一术语对的批量替换可据此快速定位）。
 
+整块差异仅为兼容字符形式（新旧文本 NFKC 等价，如全角 ＆→半角 &）的块
+无需审定：自动判 ok 写入 verdicts/auto.jsonl（聚合端照常计入），不占用
+子代理任务块；输出列出其片段形态供抽查。
+
+index-jp 发布的无原文卷清单（no_original.txt）内卷豁免原文对照：对应任务的
+提示词附豁免判定口径（按语料惯例与流畅度判定，jp 留空），不再警告报补。
+
 用法: uv run python scripts/sync/prepare_review.py
 """
 
+import difflib
 import json
 import os
 import re
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 from typing import Any
@@ -29,7 +38,16 @@ from lib_triage import repo_root, triage_parser
 
 CHUNK = 50          # 每任务块数
 SMALL = 20          # 小于此块数的文件参与合并
+CLUSTER_MIN = 3     # 同形态块达到此数即整簇成任务（批量替换波）
 JP_REPO = "../index-jp"  # 相对仓库根的位置（AGENTS.md 约定同级目录）
+
+# 豁免原文对照的任务附加段（index-jp no_original.txt 清单内卷）。
+EXEMPT_NOTE = """
+豁免原文对照：以下卷经确认无法补充日文原文（index-jp no_original.txt 清单），其块的语义类改动豁免对照：@EXEMPT_VOLS@。这些块按语料惯例与中文流畅度判定：新译明显退化（错别字、病句、成分残缺、杂字符、重复字词）→ suspect；新旧均通顺难辨优劣 → unsure；改进或同等通顺 → ok。jp 留空，cls 照填，reason 写明判定依据。"""
+
+# 批量替换簇的任务附加段（clusters 字段非空时）。
+CLUSTER_NOTE = """
+批量替换簇：任务 JSON 的 clusters 字段列出本任务的同形态簇（同一 diff 片段序列 = 同一批量替换波，ids 为成员）。逐簇处理：首个成员（代表块）按常规流程严格判定（语义类须定位原文）；其余成员逐块读 old/new 确认同一替换在其语境中同样成立——术语统一类通常成立，像/象这类语境敏感替换须逐块单独判断。同簇 jp 证据可共享（引用同一句原文即可）。verdict 仍逐块一行；簇内例外块单独判定并在 reason 写明。"""
 
 # 子代理提示词模板。@JP_TXT@/@JP_TXT_FIRST@/@N@ 为占位符。
 # 判定词汇与检索纪律的权威版本就在此模板内。
@@ -128,6 +146,17 @@ def vol_code(rel_file: str) -> str:
     return rel_file.split("]")[0].strip("[")
 
 
+def exempt_vols(jp_root: str) -> set[str]:
+    """同级 index-jp 仓库发布的无原文卷清单 no_original.txt（每行一个卷码，
+    # 起注释）：清单内卷经确认无法补充原文，豁免原文对照。"""
+    path = os.path.join(jp_root, "no_original.txt")
+    if not os.path.exists(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return {ln.split("#")[0].strip() for ln in f
+                if ln.split("#")[0].strip()}
+
+
 def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]]:
     """为涉及的卷生成 jp_text/<卷>.txt。返回 (卷→txt 路径, 缺原文的卷)。"""
     jp_root = os.path.normpath(os.path.join(root, JP_REPO))
@@ -155,15 +184,23 @@ def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]
     return paths, missing
 
 
+def block_frags(b: dict) -> tuple:
+    """块的最小差异片段序列（difflib 非 equal opcode 的 (旧片段, 新片段)）。"""
+    sm = difflib.SequenceMatcher(a=b["old"], b=b["new"], autojunk=False)
+    return tuple((b["old"][i1:i2], b["new"][j1:j2])
+                 for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != "equal")
+
+
+def compat_only(b: dict) -> bool:
+    """兼容规范化块：新旧文本 NFKC 等价——差异仅来自兼容字符形式
+    （全角/半角、兼容标点等，如 ＆→&）。意义不变、无审定价值，自动判 ok。"""
+    old, new = b["old"], b["new"]
+    return old != new and unicodedata.normalize("NFKC", old) == unicodedata.normalize("NFKC", new)
+
+
 def frag_top(blocks: list[dict], n: int = 15) -> None:
     """打印重复片段形态 Top（识别批量术语替换波次，供编排参考）。"""
-    import difflib
-    counter = Counter()
-    for b in blocks:
-        sm = difflib.SequenceMatcher(a=b["old"], b=b["new"], autojunk=False)
-        fs = tuple((b["old"][i1:i2], b["new"][j1:j2])
-                   for tag, i1, i2, j1, j2 in sm.get_opcodes() if tag != "equal")
-        counter[fs] += 1
+    counter = Counter(block_frags(b) for b in blocks)
     print(f"\n去重片段形态 {len(counter)} 种，重复形态 Top：")
     for fs, c in counter.most_common(n):
         if c < 2:
@@ -172,7 +209,7 @@ def frag_top(blocks: list[dict], n: int = 15) -> None:
         print(f"  [{c}块] {frag[:120]}")
 
 
-def chunk(blocks: list[dict]) -> list[list[dict]]:
+def chunk_by_file(blocks: list[dict]) -> list[list[dict]]:
     """按文件切块（每块 ≤CHUNK）；<SMALL 块的小文件按卷合并，余量合一组。"""
     by_file: dict[str, list[dict]] = defaultdict(list)
     for b in blocks:
@@ -196,6 +233,24 @@ def chunk(blocks: list[dict]) -> list[list[dict]]:
             rest.extend(bs)
     if rest:
         groups.append(rest)
+    return groups
+
+
+def chunk(blocks: list[dict]) -> list[list[dict]]:
+    """切块：同形态簇（≥CLUSTER_MIN 块共享同一 diff 片段序列 = 同一批量
+    替换波）整簇成任务不拆分（超 CHUNK 才切）；其余按文件切块。"""
+    by_shape: dict[tuple, list[dict]] = defaultdict(list)
+    for b in blocks:
+        by_shape[block_frags(b)].append(b)
+    groups = []
+    small = []
+    for _shape, bs in sorted(by_shape.items(), key=lambda kv: -len(kv[1])):
+        if len(bs) >= CLUSTER_MIN:
+            for k in range(0, len(bs), CHUNK):
+                groups.append(bs[k:k + CHUNK])
+        else:
+            small.extend(bs)
+    groups.extend(chunk_by_file(small))
     return groups
 
 
@@ -223,31 +278,68 @@ def main() -> int:
         json.dump(blocks, f, ensure_ascii=False, indent=1)
     print(f"块总数 {len(blocks)}")
 
+    # 兼容规范化块（NFKC 等价，如 ＆→&）自动判 ok，不占用子代理任务块
+    auto = [b for b in blocks if compat_only(b)]
+    review = [b for b in blocks if not compat_only(b)]
+    if auto:
+        shapes = Counter(block_frags(b) for b in auto)
+        top = "、".join(f"{' | '.join(f'{a}→{x}' for a, x in fs)}×{c}"
+                        for fs, c in shapes.most_common(5))
+        print(f"兼容规范化自动放行 {len(auto)} 块（{top}）")
+
     vols = sorted({vol_code(b["files"][0]) for b in blocks})
     jp_paths, missing = build_jp_text(root, vols)
     for vol, p in sorted(jp_paths.items()):
         print(f"原文 {vol} -> {os.path.relpath(p, root)}")
-    if missing:
-        print(f"警告：index-jp 缺原文卷 {missing}，相关块须报用户补充原文后核实"
+    xdirs = {d.split("]")[0].strip("["): d
+             for d in os.listdir(os.path.join(root, "X"))
+             if d.startswith("[")}
+    exempt = exempt_vols(os.path.normpath(os.path.join(root, JP_REPO)))
+    missing_real = [v for v in missing if v not in exempt]
+    missing_exempt = [v for v in missing if v in exempt]
+    if missing_exempt:
+        print(f"缺原文卷（已确认无法补充，豁免对照）："
+              f"{[xdirs.get(v, v) for v in missing_exempt]}")
+    if missing_real:
+        print(f"警告：index-jp 缺原文卷 {[xdirs.get(v, v) for v in missing_real]}，"
+              "相关块须报用户补充原文后核实"
               "（.agents/skills/sync-triage/SKILL.md §6 对照规则）")
 
-    groups = chunk(blocks)
+    groups = chunk(review)
     chunk_dir = os.path.join(triage, "review_chunks")
     prompt_dir = os.path.join(triage, "review_prompts")
     for d in (chunk_dir, prompt_dir, verdict_dir):
         os.makedirs(d, exist_ok=True)
         for old in os.listdir(d):
             os.remove(os.path.join(d, old))
+    if auto:
+        with open(os.path.join(verdict_dir, "auto.jsonl"), "w",
+                  encoding="utf-8") as f:
+            f.writelines(json.dumps(
+                {"id": b["id"], "verdict": "ok", "cls": "form", "jp": "",
+                 "reason": "auto: NFKC 等价（兼容字符形式差异）"},
+                ensure_ascii=False) + "\n" for b in auto)
     for n, bs in enumerate(groups):
         vols_n = sorted({vol_code(b["files"][0]) for b in bs})
         files = sorted({f for b in bs for f in b["files"]})
+        shapes_in: dict[tuple, list[int]] = defaultdict(list)
+        for b in bs:
+            shapes_in[block_frags(b)].append(b["id"])
+        clusters = [{"shape": [[a, x] for a, x in s], "ids": ids}
+                    for s, ids in shapes_in.items() if len(ids) >= CLUSTER_MIN]
         task_json = os.path.join(chunk_dir, f"task_{n:02d}.json")
         out_jsonl = os.path.join(verdict_dir, f"task_{n:02d}.jsonl")
         with open(task_json, "w", encoding="utf-8") as f:
-            json.dump({"vols": vols_n, "files": files, "blocks": bs},
-                      f, ensure_ascii=False, indent=1)
+            json.dump({"vols": vols_n, "files": files, "blocks": bs,
+                       "clusters": clusters}, f, ensure_ascii=False, indent=1)
         jp_lines = "\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
-        prompt = PROMPT + (
+        ex_n = [v for v in vols_n if v in missing_exempt]
+        prompt = PROMPT
+        if ex_n:
+            prompt += EXEMPT_NOTE.replace("@EXEMPT_VOLS@", "、".join(ex_n))
+        if clusters:
+            prompt += CLUSTER_NOTE
+        prompt += (
             f"\n\n任务：审查 {task_json} 的 @N@ 个块，verdict 逐块写入 "
             f"{out_jsonl}（UTF-8 每块一行），全部审完后自检：行数==@N@、"
             "每行 JSON 可解析、id 无重复无遗漏。")
@@ -258,10 +350,12 @@ def main() -> int:
         with open(os.path.join(prompt_dir, f"task_{n:02d}.md"), "w",
                   encoding="utf-8") as f:
             f.write(prompt)
-        print(f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块")
+        cl = "、".join(str(len(c["ids"])) for c in clusters)
+        print(f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块"
+              + (f"（簇 {cl}）" if cl else ""))
     print(f"\n提示词已写入 {os.path.relpath(prompt_dir, root)}/"
           "（delegate_task 每任务粘贴一份）")
-    frag_top(blocks)
+    frag_top(review)
     return 0
 
 

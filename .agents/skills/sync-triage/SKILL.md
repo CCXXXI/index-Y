@@ -50,7 +50,7 @@ uv run python scripts/sync/report_inactive_rules.py  # 报告失活规则（不�
 
 图片重命名/引用、xhtml rename、纯格式化/版式各批次支持 `--dry-run`。脚本间共享状态（rename 映射、审查材料）在仓库根目录 `.triage/`（已 gitignore）。
 
-`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`hold.txt`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`、`upstream_context.txt`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余文件（上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
+`.triage/` 中脚本自管的状态文件只有 `rename_map.json`、`hold.txt`、`plan.json`、`review_changes.txt`、`suspect_changes.txt`、`adopted_rules.json`、`upstream_context.txt`，其余均为审查草稿。**上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时工作区重新分类并覆写审查材料（从不读旧值）；`adopted_rules.json` 是累积制，候选由 report_inactive_rules 对当前 HEAD 与工作区机械复验后剔除。两个防护：triage_text 默认模式导出材料时把 `.triage/` 内其余散文件与审查目录（`verdicts/`、`review_chunks/`、`review_prompts/`；上轮审查草稿）轮转入 `.triage/prev/`（仅保留一轮），防止旧 verdict 被误当本轮结论；triage_text `--commit` 工作区清零后删除 `rename_map.json`（映射只服务于轮内 commit_image_renames → commit_image_refs）。`--commit` 模式不清草稿——中止时审查仍在继续，草稿还有用。
 
 各批次无对应改动时脚本自然空跑、不产生 commit，直接顺序往下跑即可。上游重命名图片的情况很少：commit_image_renames 无图片重命名时也会写出空 `rename_map.json`，commit_image_refs 读到空映射直接跳过。
 
@@ -213,9 +213,10 @@ uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原�
 uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用逐字核验 + 导出 suspect/unsure/unlocated
 ```
 
-- 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。index-jp 缺原文的卷 prepare 会列出，报用户补充后再核实。
+- 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。缺原文卷由 prepare 机械消费 ../index-jp/no_original.txt（无原文豁免卷清单）后分流：清单内卷豁免对照（任务提示词附豁免判定口径：按语料惯例与流畅度判定、jp 留空），其余缺卷以 X/ 完整目录名报用户补充（照抄目录名，不凭编号回忆卷名；index-jp 侧豁免的权威记录是其 AGENTS.md「已知无法补充的原文」，新增豁免须该节与 no_original.txt 同步登记）。
+- 兼容规范化块（新旧文本 NFKC 等价，差异仅来自全角/半角等兼容字符形式，如 ＆→&）由 prepare_review 自动判 ok 写入 `verdicts/auto.jsonl`，不进任务块。其余块按 diff 片段形态聚合：≥3 块同形态（同一批量替换波）整簇成一个任务（不拆分），任务 JSON 带 clusters 字段、提示词附簇判定口径（代表块严格对照、成员逐块确认语境、同簇证据共享；像/象类语境敏感替换仍逐块判）。形态 Top 与逐任务簇规模打印供抽查。
 - 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。
-- review_blocks.json 的块 id 是 verdict 的关联键。verdicts/ 非空时 prepare_review 拒绝重建（防在途任务被换底）；材料更新后需重审时，先聚合存档本轮 verdict，清空 verdicts/ 再重建。
+- review_blocks.json 的块 id 是 verdict 的关联键。verdicts/ 非空时 prepare_review 拒绝重建（防在途任务被换底）——triage_text 重新导出材料时已把上轮 `verdicts/`、`review_chunks/`、`review_prompts/` 轮转入 prev/，故拒绝即本轮真在途：先聚合存档本轮 verdict，清空 verdicts/ 再重建。
 
 ### 配套机械项
 

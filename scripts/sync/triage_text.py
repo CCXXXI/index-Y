@@ -65,21 +65,27 @@ MANAGED_STATE = {"rename_map.json", "hold.txt", "plan.json",
                  "adopted_rules.json", "upstream_context.txt"}
 
 
+# 审查草稿目录（prepare_review 的产物），随新一轮导出整体轮转
+REVIEW_DIRS = ("verdicts", "review_chunks", "review_prompts")
+
+
 def clean_scratch() -> None:
-    """默认模式导出新材料 = 新一轮审查开始：把上轮审查草稿轮转入 prev/
-    （仅保留一轮），防止旧 verdict 被误当本轮结论。--commit 模式不清：
-    中止时审查仍在继续，草稿还有用。"""
+    """默认模式导出新材料 = 新一轮审查开始：把上轮审查草稿（散文件 +
+    REVIEW_DIRS 目录）轮转入 prev/（仅保留一轮），防止旧 verdict 被误当
+    本轮结论。--commit 模式不清：中止时审查仍在继续，草稿还有用。"""
     scratch = [f for f in os.listdir(STATE_DIR)
                if f not in MANAGED_STATE and f != "prev"
                and os.path.isfile(os.path.join(STATE_DIR, f))]
-    if not scratch:
+    dirs = [d for d in REVIEW_DIRS
+            if os.path.isdir(os.path.join(STATE_DIR, d))]
+    if not scratch and not dirs:
         return
     prev = os.path.join(STATE_DIR, "prev")
     shutil.rmtree(prev, ignore_errors=True)
     os.makedirs(prev)
-    for f in scratch:
+    for f in scratch + list(dirs):
         os.replace(os.path.join(STATE_DIR, f), os.path.join(prev, f))
-    print(f"上轮审查草稿 {len(scratch)} 个移入 {prev}")
+    print(f"上轮审查草稿 {len(scratch) + len(dirs)} 个移入 {prev}")
 
 
 def term_summary(o: str, n: str, maxlen: int = 40) -> str:
