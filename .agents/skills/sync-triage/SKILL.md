@@ -22,7 +22,8 @@ uv run python scripts/sync/run_all.py --sync        # 缺省对齐最新 release
 uv run python scripts/sync/run_all.py
 
 # ===== 人工审查 =====
-# 审查 .triage/review_changes.txt（Y 侧文本块 diff 聚合，★ 行为上游记录命中），
+# 审查 .triage/review_changes.txt（Y 侧文本块 diff 聚合，★ 行为上游 commit
+# 归属与记录命中预注），
 # 为可疑改动写 x2y 规则（校正或回钉，见「上游错误的规则化」），
 # 重跑 uv run python scripts/sync/x2y.py；
 # 需暂缓提交的 rel 写入挂起清单 .triage/hold.txt（见「挂起清单」）
@@ -126,7 +127,8 @@ HEAD 自洽不受影响，可不走 stash：直接重跑 x2y，规则单独成 c
 ## 2. 审查材料与审查
 
 `review_changes.txt`：Y 侧文本块 diff 按块聚合（相同改动跨文件去重为 `[N次]`），
-每块 `- 旧` / `+ 新` 两行（结构改动为块组多行），块尾 `★` 行是上游记录命中预注。
+每块 `- 旧` / `+ 新` 两行（结构改动为块组多行），块尾 `★` 行是预注（上游 commit
+归属 + 上游记录命中，详见「上游记录的使用纪律」）。
 写规则需要 X 侧原文时直接在 `index-X/EPUB/<卷>/` 检索片段。
 
 ### 上游错误的规则化
@@ -165,7 +167,13 @@ HEAD 自洽不受影响，可不走 stash：直接重跑 x2y，规则单独成 c
 `index-X/` submodule 是审查参考源（仅经 git plumbing 读，不依赖其工作区状态）。`upstream_context.py`（run_all 自动调用，起新轮带 `--fetch`）做两层机械工作：
 
 - **pin 区间列举**：基准 = superproject HEAD 的 gitlink（上轮同步点），新侧 = submodule HEAD（本轮 checkout 的 ref），区间精确到 commit。导出区间内逐卷新 commit 列表（含 body）与 maintenance-records 全文至 `.triage/upstream_context.txt`；origin/master 领先本轮同步点时附注（属下轮内容）。
-- **块级预注**：以改动点子串在全部 records 中检索，命中行以 `★` 前缀插入审查材料块尾（prepare_review 解析时跳过）。
+- **块级预注**：两类 `★` 前缀行插入审查材料块尾（prepare_review 解析时跳过）：
+  - `★ commit <sha>: <subject>`：块的引入 commit（块文本在区间 commit 的 diff
+    纯文本中整段逐字命中，时间序；短块要求双侧命中同一 commit，整句逐字巧合
+    概率可忽略故无需统计门槛）。2+ 个 = 振荡链（旧文命中首改、新文命中末改）/
+    多区域段落块/聚合块拆分波次。`未定位` = 无逐字命中（1 字块、ruby 隔断、
+    规则交叠等）——宁可空缺不错指。body 在 `upstream_context.txt` 区间列表查。
+  - `★ <record>: <行>`：改动点子串在全部 records 中检索的命中行。
 
 记录（commit message 与 maintenance-records）是上游的**自报证据，不免检**。使用分四层：
 

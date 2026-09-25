@@ -11,8 +11,10 @@
 产物（.triage/ 下）：
 - upstream_context.txt：pin 区间、逐卷新 commit 列表（含 body）、区间内
   新增/修改的 maintenance-records 全文、全部记录索引、政策文件变更。
-- review_changes.txt 块尾预注（★ 前缀行）：块的最小差异片段在全部
-  records 中检索的命中（prepare_review 的 parse_blocks 跳过）。
+- review_changes.txt 块尾预注（★ 前缀行，prepare_review 的 parse_blocks 跳过）：
+  ① commit 归属——块文本在区间内逐 commit 的 diff 纯文本中整段逐字命中，
+  标出引入 commit（短 sha + subject，时间序；2+ 个 = 振荡链/多区域块/拆分
+  波次）；② records 命中——块的最小差异片段在全部 records 中检索的命中。
 --fetch：先 git fetch（起新轮时 run_all 带入）；在途重跑不带，离线幂等。
 用法: uv run python scripts/sync/upstream_context.py [--fetch]
 """
@@ -21,6 +23,7 @@ import difflib
 import os
 import re
 import sys
+from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import (
@@ -28,8 +31,10 @@ from lib_triage import (
     X_PREFIX,
     git,
     gitx,
+    norm_ws,
     pin_sha,
     status_line_rel,
+    text_chunks,
     triage_parser,
     x_changes,
     x_head,
@@ -39,6 +44,10 @@ RECORDS_DIR = "docs/maintenance-records"
 MAX_HIT_RECS = 4  # 每块最多列出的命中记录数
 MAX_HIT_LINES = 2  # 每条记录最多列出的命中行数
 MAX_LINE = 160  # 命中行截断
+ATTR_LONG = 10  # 较长侧 ≥ATTR_LONG 为长块：单侧整段命中即归属（整句逐字巧合可忽略）
+ATTR_MIN_SIDE = 2  # 任一侧 <ATTR_MIN_SIDE（1 字）无区分度，未定位
+ATTR_MIN_SINGLE = 6  # 纯增删块（一侧为空）：非空侧 ≥ATTR_MIN_SINGLE 才归属
+MAX_HIT_COMMITS = 4  # 每块最多列出的归属 commit 数
 BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
 
 
@@ -131,6 +140,67 @@ def windows_of(old: str, new: str) -> set[str]:
     return out
 
 
+class CommitDiff(NamedTuple):
+    """区间内一个触及 EPUB/ 的 commit：短 sha、subject、删除/新增侧纯文本。
+
+    纯文本经 text_chunks 去标记 + norm_ws，与审查块文本同形态（防标签边界、
+    实体、空白差异造成的假阴性）。
+    """
+
+    short: str
+    subject: str
+    removed: str
+    added: str
+
+
+def commit_corpus(base: str, head: str) -> list[CommitDiff]:
+    """pin 区间内触及 EPUB/ 的 commit（旧→新时间序，振荡链按叙述顺序呈现）。"""
+    shas = (
+        gitx("log", "--format=%H", f"{base}..{head}", "--", X_PREFIX).decode().split()
+    )
+    out = []
+    for sha in reversed(shas):  # log 输出新→旧，反转回时间序
+        subject = gitx("show", "-s", "--format=%s", sha).decode().strip()
+        diff = gitx("show", "--format=", "-U0", sha, "--", X_PREFIX).decode()
+        removed = [l[1:] for l in diff.splitlines() if l[:1] == "-" and l[:3] != "---"]
+        added = [l[1:] for l in diff.splitlines() if l[:1] == "+" and l[:3] != "+++"]
+
+        def plain(lines: list[str]) -> str:
+            runs = text_chunks("\n".join(lines).encode("utf-8", "replace"))
+            return "\n".join(t for t in (norm_ws(r) for r in runs) if t)
+
+        out.append(CommitDiff(sha[:8], subject, plain(removed), plain(added)))
+    return out
+
+
+def attribute(old: str, new: str, corpus: list[CommitDiff]) -> list[CommitDiff]:
+    """块的归属 commit（时间序）：块文本在 commit diff 纯文本中的整段逐字命中。
+
+    整段逐字（而非碎片统计）天然免疫巧合：完整句子在同区间无关 commit 的
+    diff 中逐字出现的概率可忽略，无需防巧合门槛。多 commit 归属均属合法：
+    振荡链（旧全文命中首改的 removed、新全文命中末改的 added）、多区域段落
+    块（各 commit 各改一处）、聚合块的拆分波次。长度校准：短块（较长侧
+    <ATTR_LONG）要求双侧命中同一 commit（单侧短词巧合多）；任一侧
+    <ATTR_MIN_SIDE（1 字）无区分度；纯增删块非空侧 ≥ATTR_MIN_SINGLE 才归属。
+    漏归（ruby 隔断、规则交叠等块文本与 X 侧不逐字一致的情形）以未定位呈现
+    ——宁可空缺不错指。
+    """
+    if not old or not new:
+        t = old or new
+        if len(t) < ATTR_MIN_SINGLE:
+            return []
+        return [c for c in corpus if t in (c.removed if old else c.added)]
+    if min(len(old), len(new)) < ATTR_MIN_SIDE:
+        return []
+    need_both = max(len(old), len(new)) < ATTR_LONG
+    out = []
+    for c in corpus:
+        o_hit, n_hit = old in c.removed, new in c.added
+        if (o_hit and n_hit) if need_both else (o_hit or n_hit):
+            out.append(c)
+    return out
+
+
 def search_records(corpus: dict[str, str], frags: set[str]) -> list[str]:
     """片段在全部 records 中的命中行（★ 预注行列表，限量截断）。"""
     hits, n_rec = [], 0
@@ -150,27 +220,44 @@ def search_records(corpus: dict[str, str], frags: set[str]) -> list[str]:
     return hits
 
 
-def annotate(path: str, corpus: dict[str, str]) -> int:
-    """在 review/suspect 材料每块尾部插入 ★ 预注行；返回预注块数。
+def annotate(
+    path: str, corpus: dict[str, str], commits: list[CommitDiff]
+) -> tuple[int, int]:
+    """在 review/suspect 材料每块尾部插入 ★ 预注行；返回 (commit 归属块数, records 命中块数)。
 
     行级遍历保持原格式：块 = [N次]/[X|Y] 头行 + -/+ 行与续行，空行收尾。
     triage_text 每次导出都覆写原材料，故预注天然幂等（材料更新后重跑本脚本）。
+    块尾先列 commit 归属（块的引入 commit；2+ 个 = 振荡链/多区域块/拆分波次），
+    再列 records 命中。
     """
     if not os.path.exists(path):
-        return 0
+        return 0, 0
     with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
     out: list[str] = []
-    n_annotated = 0
+    n_commit, n_records = 0, 0
     old: list[str] = []
     new: list[str] = []
     side: list[str] | None = None
 
     def flush() -> None:
-        nonlocal n_annotated
-        hits = search_records(corpus, windows_of("\n".join(old), "\n".join(new)))
+        nonlocal n_commit, n_records
+        o_text, n_text = "\n".join(old), "\n".join(new)
+        if not o_text and not n_text:
+            return  # 文件末尾的空 flush（或零区域块）：无可归属，不产预注行
+        if commits:
+            at = attribute(o_text, n_text, commits)
+            if at:
+                n_commit += 1
+                for c in at[:MAX_HIT_COMMITS]:
+                    out.append(f"★ commit {c.short}: {c.subject}")
+                if len(at) > MAX_HIT_COMMITS:
+                    out.append(f"★ commit …共 {len(at)} 个，详见 upstream_context.txt")
+            else:
+                out.append("★ commit: 未定位")
+        hits = search_records(corpus, windows_of(o_text, n_text))
         out.extend(hits)
-        n_annotated += bool(hits)
+        n_records += bool(hits)
         old.clear()
         new.clear()
 
@@ -192,7 +279,7 @@ def annotate(path: str, corpus: dict[str, str]) -> int:
     flush()
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
-    return n_annotated
+    return n_commit, n_records
 
 
 def main() -> int:
@@ -264,9 +351,13 @@ def main() -> int:
         f"records 变更 {len(new_recs)} 篇）"
     )
 
-    n = annotate(os.path.join(STATE_DIR, "review_changes.txt"), corpus)
-    if n:
-        print(f"review_changes.txt: {n} 块命中上游记录（★ 预注）")
+    n_commit, n_rec = annotate(
+        os.path.join(STATE_DIR, "review_changes.txt"), corpus, commit_corpus(base, head)
+    )
+    print(
+        f"review_changes.txt: {n_commit} 块归属上游 commit，"
+        f"{n_rec} 块命中上游记录（★ 预注）"
+    )
     return 0
 
 
