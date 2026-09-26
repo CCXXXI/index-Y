@@ -28,9 +28,13 @@ uv run python scripts/sync/run_all.py
 # 重跑 uv run python scripts/sync/x2y.py；
 # 需暂缓提交的 rel 写入挂起清单 .triage/hold.txt（见「挂起清单」）
 
-# ===== 审查后收尾（自动，工作区清零） =====
+# ===== 审查后收尾（自动） =====
 uv run python scripts/sync/run_all.py --finish
-# 结束后 pin 推进到新 ref（X 与上游逐字一致）、Y == x2y(X)，无任何改动残留在工作区
+# 无在途规则：一笔原子同步提交，工作区清零。
+# 有在途规则：自动 stash 规则 → 落纯上游形态的原子同步提交 → 恢复规则并重渲染，
+# 报告待提交清单（非零码退出，轮次保持开放）；把 rules/ 改动与 Y 侧规则效果文件
+# 作为单个规则提交入仓（diff 即规则生效形态），工作区清零后本轮才结束。
+# 终态：pin 推进到新 ref（X 与上游逐字一致）、Y == x2y(X)，无任何改动残留在工作区
 ```
 
 `run_all.py` 依次调用的单步脚本（调试/单步重跑时用）：
@@ -48,9 +52,12 @@ uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + r
 **数据模型**：`index-X/` 是上游仓库的 submodule（pin = superproject HEAD 的 gitlink，
 即上轮同步点），X 语料即其 `EPUB/` 树。X 侧「旧」= pin，「新」= submodule HEAD，轮内恒定。
 
-**审查材料按构造只有上游驱动改动**：校对提交的 rules/ 与 Y 侧规则效果同 commit 入仓
-（HEAD 自洽），轮末 freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` =
-Y 侧 HEAD→工作区的文本块 diff 就是全部待审内容，不做分类、无需 X/Y 配对。审查即门控。
+**审查材料按构造只有上游驱动改动**：规则改动随 `--finish` 延迟落地（见「4. 收尾」），
+原子同步提交前先 stash 规则重渲染，落仓的 Y 即纯上游形态（HEAD 自洽），轮末
+freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` = Y 侧 HEAD→工作区的
+文本块 diff 就是全部待审内容，不做分类、无需 X/Y 配对。审查即门控。
+（例外：审查中改规则重跑 x2y 后到 `--finish` 前，材料会混入自己的规则效果，
+见「0.5 分流中途修改规则」。）
 以下改动天然不进审查材料（文本块提取不可见或机械过滤），随原子提交自动入仓：
 
 - 纯格式化/属性/版式改动（文本块零差异的文本文件）；
@@ -82,11 +89,12 @@ Y 侧 HEAD→工作区的文本块 diff 就是全部待审内容，不做分类�
 
 ## 提交形态
 
-一轮 = 审查期若干 rule commits（rules/ 与其 Y 侧规则效果）+ 轮末一笔原子提交
-`{gitlink 推进, 全部 Y 侧改动}`（排除挂起清单）。原子提交命名
-`fix: sync X/Y ← index-X@<tag>（N 文件，M 处文本修订）`，body 列逐文件摘要。
-X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是净化产物；
-`check_y_freshness`（--finish 前置）保证不变式对全部文件成立。
+一轮 = 轮末一笔原子同步提交 `{gitlink 推进, 全部 Y 侧改动}`（纯上游形态，排除挂起
+清单）+ 随后的规则提交（在途 rules/ 改动与其 Y 侧规则效果同 commit，diff 即规则
+生效形态，便于人工核查）。原子提交命名 `fix: sync X/Y ← index-X@<tag>（N 文件，
+M 处文本修订）`，body 列逐文件摘要；规则提交命名 `fix: 校正…（卷清单）`，body 附
+最小差异摘要（`旧→新`）。X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是
+净化产物；`check_y_freshness`（--finish 前置）保证不变式对全部文件成立。
 
 ## 0. 前置校验：Y 必须与当前 X 同步
 
@@ -101,17 +109,12 @@ x2y.py，Y 滞后一个上游版本）。
 
 ## 0.5 分流中途修改规则
 
-分流进行中（工作区有在途改动时）改规则，有触发的规则会使 Y 滞后。用 stash 隔离后落地：
-
-1. `git stash push -u`（必须 `-u`，在途可能含 untracked 新文件）；
-2. 改 `rules/`，重跑 `uv run python scripts/sync/x2y.py`；
-3. 验证 Y 侧 diff 的每个 hunk 都是规则效果，把规则与 Y 侧改动作为单个 commit 提交；
-4. `git stash pop`（同一文件内规则效果与在途改动不重叠时自动合并）；
-5. `check_y_freshness` 通过后方可继续；重跑 triage_text 重新导出材料（幂等）。
-
-捷径：若新规则的键在全卷 HEAD X 命中 0 次（回钉/校正上游新增文本的键天然满足），
-HEAD 自洽不受影响，可不走 stash：直接重跑 x2y，规则单独成 commit
-（`git commit rules/<卷>.tsv -m ...` 带路径限定），Y 侧规则效果随原子提交。
+审查进行中改规则**无需中途提交**：改 `rules/` 后重跑 `uv run python scripts/sync/x2y.py`，
+验证 Y 侧 diff 的每个 hunk 都是规则效果，重跑 triage_text 重导材料（幂等，已净化的
+块消失）。规则改动留在工作区，`--finish` 统一处理：自动 stash 规则落纯上游形态的
+原子同步提交，再恢复规则重渲染（Y 侧相对 HEAD 只剩规则效果），报告待提交清单。
+注意此后到规则提交落地前，审查材料会混入自己的规则效果（HEAD 自洽暂缓到收尾恢复）；
+跨轮防护不变——规则提交未落地前 `--sync` 被 update_x 拒绝。
 
 ## 1. 通用 git 操作坑（本仓库路径含中文与方括号）
 
@@ -211,7 +214,13 @@ uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用�
 
 ## 4. 收尾
 
-triage_text `--commit` 先做覆盖核验：Y 侧每条在途改动都必须入覆盖集（文本块/新增/
-删除/纯格式化/非文本镜像/挂起），非 Y 侧改动（rules/、scripts/ 等 stray）同样列出——
-**核验先于提交，中止时本轮不产生任何提交**，人工按性质提交后重跑 `--finish`。
-核验通过后一笔原子提交 `{gitlink 推进, 全部 Y 侧改动}`，工作区清零后分流结束。
+`--finish` 先跑 check_y_freshness（不变式前提），再按 rules/ 是否有在途改动分路：
+
+- **无在途规则**：triage_text `--commit` 覆盖核验（Y 侧每条在途改动都必须入覆盖集：
+  文本块/新增/删除/纯格式化/非文本镜像/挂起；非 Y 侧 stray 同样列出——**核验先于
+  提交，中止时本轮不产生任何提交**，人工按性质提交后重跑 `--finish`）后一笔原子
+  同步提交 `{gitlink 推进, 全部 Y 侧改动}`，工作区清零后分流结束。
+- **有在途规则**：自动 stash 规则 → 重渲染（Y 回纯上游形态）→ triage_text `--commit`
+  落原子同步提交 → 恢复规则 → 重渲染（Y 侧只剩规则效果）→ 报告待提交清单并以
+  非零码退出（轮次保持开放）。把 rules/ 改动与 Y 侧规则效果文件作为单个规则提交
+  入仓（diff 即规则生效形态），工作区清零后本轮才结束——无需再跑 `--finish`。
