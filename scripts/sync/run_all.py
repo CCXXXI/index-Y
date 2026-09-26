@@ -6,7 +6,10 @@
 默认流程——要求工作区干净且 submodule HEAD == pin，上轮未收尾会被拒绝
 （在途审查会被新版顶掉）；另校验 HEAD 自洽（Y == x2y(X)），拦上轮改 rules/
 后漏跑 x2y.py 的陈旧 Y；在途分流中重跑不带 --sync。
---finish（人工审查后）：check_y_freshness → triage_text --commit（原子提交）。
+--finish（人工审查后）：check_y_freshness → triage_text --commit（原子同步
+提交，纯上游形态）；rules/ 有在途改动时自动 stash 规则 → 原子提交 → 恢复 →
+重渲染，报告待提交清单并以非零码退出（轮次保持开放）——规则提交
+（rules/ 与 Y 侧规则效果同 commit，diff 即规则生效形态）落地后本轮才收尾。
 
 任一脚本失败即中止。各步骤本身幂等，可整体重跑。
 用法: uv run python scripts/sync/run_all.py [--sync [REF]] [--finish]
@@ -29,6 +32,45 @@ def run(script: str, *args: str) -> None:
     )
     if r.returncode != 0:
         raise SystemExit(f"{script} 失败（exit {r.returncode}），中止")
+
+
+def git_ok(*args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "GIT_LITERAL_PATHSPECS": "1"}
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, check=False, env=env
+    )
+
+
+def finish() -> None:
+    run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
+    if not git_ok("status", "--porcelain", "-z", "--", "rules/").stdout:
+        run("triage_text.py", "--commit")
+        return
+    # rules/ 有在途改动：先 stash 规则落纯上游形态的原子同步提交，再恢复规则
+    # 并重渲染——随后的规则提交（rules/ 与 Y 侧规则效果同 commit）diff 即生效形态
+    r = git_ok("stash", "push", "-u", "-m", "run_all --finish 在途规则", "--", "rules/")
+    if r.returncode != 0:
+        raise SystemExit(f"git stash push rules/ 失败：\n{r.stdout}{r.stderr}")
+    try:
+        run("x2y.py")  # HEAD 规则重渲染：Y 回到纯上游形态
+        run("triage_text.py", "--commit")
+    finally:
+        r = git_ok("stash", "pop")
+        if r.returncode != 0:
+            raise SystemExit(
+                "git stash pop 失败：在途规则改动仍保留在 stash 中"
+                "（git stash list 可见，恢复后重跑 x2y.py）：\n"
+                f"{r.stdout}{r.stderr}"
+            )
+    run("x2y.py")  # 恢复在途规则后重渲染：Y 侧相对 HEAD 只剩规则效果
+    left = [e for e in git_ok("status", "--porcelain", "-z").stdout.split("\0") if e]
+    listing = "\n".join(f"  {e[:2]} {e[3:]}" for e in left)
+    raise SystemExit(
+        "原子同步提交已完成（纯上游形态）。以下在途改动应作为单个规则提交入仓"
+        "（rules/ 与 Y 侧规则效果同 commit，diff 即规则生效形态；body 附 旧→新 "
+        "最小差异摘要），提交后工作区清零，本轮收尾完成（非失败，无需再跑 --finish）：\n"
+        + listing
+    )
 
 
 def update_x(ref: str | None) -> None:
@@ -80,15 +122,14 @@ def main() -> None:
     parser.add_argument(
         "--finish",
         action="store_true",
-        help="人工审查后收尾：check_y_freshness → triage_text --commit",
+        help="人工审查后收尾：原子同步提交（纯上游形态）；rules/ 在途改动自动延迟为随后的规则提交",
     )
     args = parser.parse_args()
     ensure_x()
     if args.finish:
         if args.sync is not None:
             parser.error("--finish 不接受 --sync 参数")
-        run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
-        run("triage_text.py", "--commit")
+        finish()
         return
     if args.sync is not None:
         update_x(args.sync or None)
