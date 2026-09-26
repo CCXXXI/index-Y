@@ -42,6 +42,29 @@ SMALL = 20  # 小于此块数的文件参与合并
 CLUSTER_MIN = 3  # 同形态块达到此数即整簇成任务（批量替换波）
 JP_REPO = "../index-jp"  # 相对仓库根的位置（AGENTS.md 约定同级目录）
 
+# 行号直读提示词（任务全部块落在 bw_aligned pass 卷且逐块定位成功时）。
+# 原文已按行号对齐，无需关键词检索；行号失配是诚实失败形态，判 unlocated。
+PROMPT_ALIGNED = r"""背景：你在 index-Y 仓库（C:\Users\ccxxx\Documents\GitHub\index-Y）做上游同步分流的审查。任务 JSON 的 blocks 为 [{id, files, old, new, jp_loc}]，old=旧译文，new=上游新译文（《魔禁》系列粉丝翻译修订）。绝大多数改动是正常改进，你的任务是逐块鉴定。
+
+日文原文已与译文逐行对齐（复用上游对齐管线，门禁 0 问题）：每块的 jp_loc 列出 files 各次出现的 {file（译文文件）, line（该文件中译文行号）, jp（对应的日文行剥标签文本）, context（前后行，L行号: 文本）}。直接以 jp 行对照判定，无需检索原文。另附全卷对齐原文供扩大上下文（〔单元 L行号〕前缀，已剥 <rt> 注音和标签）：
+@JP_TXT@
+
+判定词汇（固定，不得自造新标签）：
+- ok：改动正常。含：错别字修正、的地得、标点全半角、术语/译名统一（目标形式非错误形式）、语句通顺且与原文一致或更忠实的重译。
+- suspect：确认有问题。特征：明显退化（改出错别字、的地误用方向反了）、重复字词/标点、混入杂字符、删字致病句或成分残缺、数字/专名改动无规律、新译与原文不符（误译、含义反转、无中生有、漏译原文信息）。
+- unsure：难以判断（新旧都说得通，或对上 jp 行后仍无法确定哪个更对）。宁漏报勿误报：拿不准就 unsure 不放行；但判 suspect 与后续写规则一样须有积极证据（宁可放行上游错误改动，不错误指责上游正确改动）。
+- unlocated：语义类改动但 jp 行文本与块明显无关（行号失配），reason 注明「行号失配」。
+
+判定规则：
+1. 形式级改动（错字/标点/的地得/空白）凭中文正确性直接判 ok/suspect，cls="form"，jp 留空。
+2. 语义/措辞类改动（词替换、语序、整句重译、增删内容）必须对照 jp_loc 的日文行后再判，cls="semantic"，jp 填从 jp_loc 的 jp 或 context 中逐字复制的片段。通顺不等于正确；看似莫名的改动也可能是原文的忠实再现。新旧都偏离原文时，只在新译更差（错译/反义/增删信息）时判 suspect；新译更忠实或同等 → ok。语义判定必须逐块对照原文，不接受「同批同类已证实」的归纳。
+3. 多文件块（jp_loc 多个出现）：逐处对照，任一处的 jp 行即可作证据。
+4. 术语统一类（同一 A→B 在多块重复）：仍逐块判，但同一术语对的 jp 证据可引用同一句。
+
+输出：逐块向 verdict 文件追加一行 JSON：{"id": <块id>, "verdict": "ok"|"suspect"|"unsure"|"unlocated", "cls": "form"|"semantic", "jp": "<原文片段，form 级留空>", "reason": "<≤30字>"}。jp 字段逐字复制 jp_loc 或对齐原文文件的文本，长句省略处以 … 分段（聚合端按 … 拆分后逐段逐字子串核验，改写字词会判为疑似编造）。每审完一批就追加写盘。禁止修改仓库中除该 verdict 文件以外的任何文件。
+
+FINAL SUMMARY 要求：ok/suspect/unsure/unlocated 各多少；suspect/unsure/unlocated 的 id 各附一句话理由。"""
+
 # 豁免原文对照的任务附加段（index-jp no_original.txt 清单内卷）。
 EXEMPT_NOTE = """
 豁免原文对照：以下卷经确认无法补充日文原文（index-jp no_original.txt 清单），其块的语义类改动豁免对照：@EXEMPT_VOLS@。这些块凭中文质量与语料惯例判定：有明确退化证据（错别字、病句、成分残缺、杂字符、重复字词，或违反全语料既定译名/术语统一方向）→ suspect；其余一律 → ok——新旧难以分辨优劣也判 ok，并在 reason 注明疑点存查。宁漏报勿误报：无积极证据不指责上游改动（写规则须以可坐实的退化证据为前提）。jp 留空，cls 照填，reason 写明判定依据。"""
@@ -148,6 +171,119 @@ def page_text(path: str) -> str:
 
 def vol_code(rel_file: str) -> str:
     return rel_file.split("]")[0].strip("[")
+
+
+def aligned_vols(root: str) -> dict[str, str]:
+    """index-jp bw_aligned 管线 pass 卷：卷码 → 对齐单元目录（行号与译文一一对应）。"""
+    base = os.path.normpath(os.path.join(root, JP_REPO, ".cache", "bw_aligned"))
+    mf = os.path.join(base, "manifest.json")
+    if not os.path.exists(mf):
+        return {}
+    with open(mf, encoding="utf-8") as f:
+        m = json.load(f)
+    return {v: os.path.join(base, v) for v, r in m.items() if r.get("status") == "pass"}
+
+
+UNIT_RE = re.compile(r"(S\d+_\d+(?:_\d+)?|S6_\d{2}\.\d{2}\.\d{2})-(\d+)", re.IGNORECASE)
+
+
+def unit_code(rel_file: str) -> str | None:
+    """译文 rel 路径 → 内容序单元码（S3_04-09）。"""
+    m = UNIT_RE.search(os.path.basename(rel_file))
+    return f"{m.group(1).upper()}-{m.group(2)}" if m else None
+
+
+def strip_line(line: str) -> str:
+    """单行 xhtml → 剥 <rt>/标签、归并空白的纯文本（与 jp_text 口径一致）。"""
+    p = TextOnly()
+    p.feed(line)
+    return re.sub(r"\s+", "", "".join(p.parts))
+
+
+def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] | None:
+    """为块的每个 files 出现定位 (file, line, jp, context)；任一处失败返回 None。
+
+    定位锚：块 new 文本的最长非空行（≥8 字）在 X 译文文件剥标签行中的唯一命中；
+    未命中时退用 old 文本（本仓库规则改过的块在 X 侧是规则前的文本形态）。
+    """
+    locs = []
+    for rel in b["files"]:
+        vol = vol_code(rel)
+        unit = unit_code(rel)
+        xfile = os.path.join(
+            root,
+            "index-X",
+            "EPUB",
+            xdirs.get(vol, vol),
+            "OEBPS",
+            "Text",
+            os.path.basename(rel),
+        )
+        jpfile = os.path.join(aligned.get(vol, ""), f"{unit}.xhtml")
+        if not unit or vol not in aligned or not os.path.exists(jpfile):
+            return None
+        with open(xfile, encoding="utf-8") as f:
+            xlines = f.read().splitlines()
+        with open(jpfile, encoding="utf-8") as f:
+            jplines = f.read().splitlines()
+        if len(xlines) != len(jplines):
+            return None
+        anchors = sorted(
+            (
+                ln
+                for side in (b["new"], b["old"])
+                for ln in side.split("\n")
+                if len(ln.strip()) >= 8
+            ),
+            key=len,
+            reverse=True,
+        )
+        hit = -1
+        for a in anchors:
+            found = [i for i, ln in enumerate(xlines) if a in strip_line(ln)]
+            if len(found) == 1:
+                hit = found[0]
+                break
+        if hit < 0:
+            return None
+        ctx = []
+        for k in range(max(0, hit - 2), min(len(jplines), hit + 3)):
+            t = strip_line(jplines[k])
+            if t:
+                ctx.append(f"L{k + 1}: {t}")
+        locs.append(
+            {
+                "file": rel,
+                "line": hit + 1,
+                "jp": strip_line(jplines[hit]),
+                "context": ctx,
+            }
+        )
+    return locs
+
+
+def build_aligned_text(root: str, vols: list[str], aligned: dict) -> dict[str, str]:
+    """为 aligned 卷导出 jp_text/<卷>.aligned.txt（〔单元 L行号〕前缀剥标签文本）。"""
+    out_dir = os.path.join(root, ".triage", "jp_text")
+    os.makedirs(out_dir, exist_ok=True)
+    paths = {}
+    for vol in vols:
+        if vol not in aligned:
+            continue
+        lines = []
+        for f in sorted(os.listdir(aligned[vol])):
+            if not f.endswith(".xhtml"):
+                continue
+            unit = os.path.splitext(f)[0]
+            with open(os.path.join(aligned[vol], f), encoding="utf-8") as fh:
+                for n, ln in enumerate(fh.read().splitlines(), 1):
+                    t = strip_line(ln)
+                    if t:
+                        lines.append(f"〔{unit} L{n:04d}〕{t}")
+        paths[vol] = os.path.join(out_dir, f"{vol}.aligned.txt")
+        with open(paths[vol], "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    return paths
 
 
 def exempt_vols(jp_root: str) -> set[str]:
@@ -335,6 +471,10 @@ def main() -> int:
         )
 
     groups = chunk(review)
+    aligned = aligned_vols(root)
+    aligned_paths = build_aligned_text(root, vols, aligned)
+    for vol, p in sorted(aligned_paths.items()):
+        print(f"对齐原文 {vol} -> {os.path.relpath(p, root)}")
     chunk_dir = os.path.join(triage, "review_chunks")
     prompt_dir = os.path.join(triage, "review_prompts")
     for d in (chunk_dir, prompt_dir, verdict_dir):
@@ -368,6 +508,19 @@ def main() -> int:
             for s, ids in shapes_in.items()
             if len(ids) >= CLUSTER_MIN
         ]
+        # 行号直读：任务全部块落在 bw_aligned pass 卷且逐块定位成功时启用
+        use_aligned = bool(vols_n) and all(v in aligned for v in vols_n)
+        if use_aligned:
+            locs = {}
+            for b in bs:
+                loc = locate_block(root, xdirs, aligned, b)
+                if loc is None:
+                    use_aligned = False
+                    break
+                locs[b["id"]] = loc
+            if use_aligned:
+                for b in bs:
+                    b["jp_loc"] = locs[b["id"]]
         task_json = os.path.join(chunk_dir, f"task_{n:02d}.json")
         out_jsonl = os.path.join(verdict_dir, f"task_{n:02d}.jsonl")
         with open(task_json, "w", encoding="utf-8") as f:
@@ -377,9 +530,14 @@ def main() -> int:
                 ensure_ascii=False,
                 indent=1,
             )
-        jp_lines = "\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
+        if use_aligned:
+            jp_lines = "\n".join(
+                f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
+            )
+        else:
+            jp_lines = "\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
         ex_n = [v for v in vols_n if v in missing_exempt]
-        prompt = PROMPT
+        prompt = PROMPT_ALIGNED if use_aligned else PROMPT
         if ex_n:
             prompt += EXEMPT_NOTE.replace("@EXEMPT_VOLS@", "、".join(ex_n))
         if clusters:
@@ -401,6 +559,7 @@ def main() -> int:
         cl = "、".join(str(len(c["ids"])) for c in clusters)
         print(
             f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块"
+            + ("（行号直读）" if use_aligned else "")
             + (f"（簇 {cl}）" if cl else "")
         )
     print(

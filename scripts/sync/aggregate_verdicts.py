@@ -78,12 +78,14 @@ def main() -> int:
         cited += 1
         vol = want[i]["files"][0].split("]")[0].strip("[")
         if vol not in jp_cache:
-            p = os.path.join(triage, "jp_text", f"{vol}.txt")
-            if os.path.exists(p):
-                with open(p, encoding="utf-8") as f:
-                    jp_cache[vol] = norm_jp(f.read())
-            else:
-                jp_cache[vol] = None
+            # 语料 = 分页 jp_text + 行号对齐 jp_text（行号直读任务的引文来源）
+            parts_src = []
+            for suffix in (".txt", ".aligned.txt"):
+                p = os.path.join(triage, "jp_text", f"{vol}{suffix}")
+                if os.path.exists(p):
+                    with open(p, encoding="utf-8") as f:
+                        parts_src.append(f.read())
+            jp_cache[vol] = norm_jp("\n".join(parts_src)) if parts_src else None
         src = jp_cache[vol]
         if src is None:
             bad.append(f"id {i}: 卷 {vol} 无 jp_text 而 jp 引用非空")
