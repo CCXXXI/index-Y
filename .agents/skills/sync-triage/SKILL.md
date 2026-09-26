@@ -196,7 +196,8 @@ uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用�
 
 - 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。缺原文卷由 prepare 机械消费 ../index-jp/no_original.txt（无原文豁免卷清单）后分流：清单内卷豁免对照（任务提示词附豁免判定口径：按语料惯例与流畅度判定、jp 留空），其余缺卷以 `index-X/EPUB/` 下完整目录名报用户补充（照抄目录名，不凭编号回忆卷名；新增豁免登记 no_original.txt——它是豁免清单的唯一权威）。
 - 兼容规范化块（新旧文本 NFKC 等价，差异仅来自全角/半角等兼容字符形式，如 ＆→&）由 prepare_review 自动判 ok 写入 `verdicts/auto.jsonl`，不进任务块。其余块按 diff 片段形态聚合：≥3 块同形态（同一批量替换波）整簇成一个任务（不拆分），任务 JSON 带 clusters 字段、提示词附簇判定口径（代表块严格对照、成员逐块确认语境、同簇证据共享；像/象类语境敏感替换仍逐块判）。形态 Top 与逐任务簇规模打印供抽查。
-- 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。
+- 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。错位治理类提交（红/黄区）的 suspect 复核先过两道排伪：①「被删」内容可能只是归位移位——在新 X 全卷检索该内容，仍在则放行；②块截断会把句内重组伪装成漏译——回源文件读完整段落再判（如从句提前）。复核「归属/指代错改」类时，以 jp 叙述行（谁皱眉、谁答话）锁定说话人，不凭语感觉归属。
+- 审查任务量与额度（实测估算，后续轮次验证/修正）：Kimi 5h 窗口实测一个满血窗口约审 **1500 块**（2026.09.25 轮：窗口 2 消耗 65.42% 完成 1007 块 + 20 个 resume 重放 + 父会话开销 ≈ 0.065%/块）。限额约束的是**一波总块数**而非并发数（总消耗与并发无关；并发只影响墙钟与撞墙死亡数，39 并发实测无速率限制）。静态口径：单波 ≤ 1200 块（留 ~20% 余量）、50 块/任务、**并发 ≤ 24**。派波前查 5h 窗水位与 reset（查询手段按运行环境的额度工具，无则退回静态口径）：`待派块数 × 0.065%` 对照余量——余量不足则减并发（余量块数 ÷ 50 取整）或推迟至 reset。撞限额后的恢复：verdict 逐块增量落盘，按 hermes-session-recovery 流程 `hermes chat --resume <子会话id>` 断点续跑（指令含「先读 verdict 去重、只补缺失 id」，先探一个确认额度恢复再铺开）。
 - review_blocks.json 的块 id 是 verdict 的关联键。verdicts/ 非空时 prepare_review 拒绝重建（防在途任务被换底）——triage_text 重新导出材料时已把上轮 `verdicts/`、`review_chunks/`、`review_prompts/` 轮转入 prev/，故拒绝即本轮真在途：先聚合存档本轮 verdict，清空 verdicts/ 再重建。
 
 ## 3. 挂起清单
