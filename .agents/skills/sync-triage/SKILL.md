@@ -192,11 +192,12 @@ x2y.py，Y 滞后一个上游版本）。
 候选块多、语义改动占比大时（如整卷重译波），派子代理分片对照日文原文审查：
 
 ```bash
-uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原文纯文本 + review_chunks/ 任务块 + review_prompts/ 提示词
+uv run python scripts/sync/prepare_review.py   # 解析材料 → jp_text/ 原文 + review_chunks/ 任务块 + review_prompts/ 提示词
 # delegate_task 每个 task_NN.md 派一个子代理（中断可安全重派）
 uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用逐字核验 + 导出 suspect/unsure/unlocated
 ```
 
+- **行号直读（优先路径）**：index-jp `scripts/bw_align.py` 已对 BW 卷复现上游行号对齐（`.cache/bw_aligned/`，pass 卷与中文侧逐行咬合）。prepare_review 对全部块落在 pass 卷且逐块定位成功的任务启用行号直读：任务 JSON 每块带 `jp_loc`（译文行号 + 对应日文行 + 前后文），提示词无关键词检索纪律，行号失配判 unlocated（诚实失败）；`jp_text/<卷>.aligned.txt` 供扩大上下文，聚合端 jp 语料 = 分页 + 对齐两份。不满足条件（含非 BW 卷、定位失败、混合卷）的任务走原关键词检索路径，输出打印「（行号直读）」标记可核。
 - 判定词汇（ok/suspect/unsure/unlocated）与原文检索纪律的权威版本在 prepare_review.py 的提示词模板内。缺原文卷由 prepare 机械消费 ../index-jp/no_original.txt（无原文豁免卷清单）后分流：清单内卷豁免对照（任务提示词附豁免判定口径：按语料惯例与流畅度判定、jp 留空），其余缺卷以 `index-X/EPUB/` 下完整目录名报用户补充（照抄目录名，不凭编号回忆卷名；新增豁免登记 no_original.txt——它是豁免清单的唯一权威）。
 - 兼容规范化块（新旧文本 NFKC 等价，差异仅来自全角/半角等兼容字符形式，如 ＆→&）由 prepare_review 自动判 ok 写入 `verdicts/auto.jsonl`，不进任务块。其余块按 diff 片段形态聚合：≥3 块同形态（同一批量替换波）整簇成一个任务（不拆分），任务 JSON 带 clusters 字段、提示词附簇判定口径（代表块严格对照、成员逐块确认语境、同簇证据共享；像/象类语境敏感替换仍逐块判）。形态 Top 与逐任务簇规模打印供抽查。
 - 子代理 verdict 是自报结论：suspect/unsure/unlocated 逐条人工复核、ok 抽查后，再放行或写规则。错位治理类提交（红/黄区）的 suspect 复核先过两道排伪：①「被删」内容可能只是归位移位——在新 X 全卷检索该内容，仍在则放行；②块截断会把句内重组伪装成漏译——回源文件读完整段落再判（如从句提前）。复核「归属/指代错改」类时，以 jp 叙述行（谁皱眉、谁答话）锁定说话人，不凭语感觉归属。
