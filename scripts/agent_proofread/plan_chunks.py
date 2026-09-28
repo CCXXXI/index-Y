@@ -20,6 +20,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import jp_align
+
 WRAPPER_SUFFIXES = (
     "Cover",
     "Back_cover",
@@ -159,6 +162,16 @@ def main() -> int:
         )
         print(f"     goal: 校对通读 {goal}（约 {c.chars // 1000} 千字符）")
 
+    vol_code = vol.split("]")[0].strip("[")
+    aligned_note = ""
+    if vol_code in jp_align.aligned_vols(ROOT.parent / "index-jp"):
+        aligned_note = (
+            f"本卷日文原文已行号对齐（bw_aligned pass）：../index-jp/.cache/bw_aligned/{vol_code}/"
+            "<单元>.xhtml 与译文行号一一对应（单元码 = 译文文件名前段，如 -07_Chapter6.xhtml → -07）。"
+            "回原文核对直接读对应单元文件的同一物理行（剥 <rt>/标签），不用关键词检索；"
+            "仅当该行文本与译文明显不相关（行号失配）时，才退回模板的 proofreading_locate.py 批量清单法。"
+        )
+
     # 全部块共用的分派参数：context 短指令（子 agent 自载模板）+ output_schema。
     # schema 单一来源是模板【output_schema】节，此处提取后原样转印。
     template = (
@@ -180,7 +193,8 @@ def main() -> int:
         f'（先 skill_view(name="agent-proofread", file_path="templates/chapter-agent-prompt.md") 加载）：'
         f"模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}（含左方括号）。"
         f"goal 给出的行区间即你的校对主区间，逐行通读；疑点回原文核对用模板规定的 proofreading_locate.py 批量清单法。"
-        f"final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。"
+        + aligned_note
+        + "final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。"
     )
     print("\noutput_schema（全部块共用，逐字复制进每个 task）:")
     print(schema)

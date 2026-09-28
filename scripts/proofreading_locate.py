@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+import jp_align
 from tqdm import tqdm
 
 ROOT = Path(__file__).parent.parent
@@ -116,6 +117,34 @@ def jp_contexts(jp_root: Path, vol: str, needle: str) -> list[str]:
     return hits
 
 
+def line_hits(root: Path, vol: str, needle: str) -> list[tuple[str, int]]:
+    """逐行扫描目标卷，返回 [(文件名, 行号)]（供行号直读定位）。"""
+    hits = []
+    for f in sorted((root / vol).rglob("*")):
+        if f.suffix not in TEXT_EXT:
+            continue
+        for n, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if needle in ln:
+                hits.append((f.name, n))
+    return hits
+
+
+def jp_direct(jp_root: Path, vol: str, needle: str, x_dir: Path) -> list[str]:
+    """行号直读（bw_aligned pass 卷）：X 侧命中行的同行号日文行。非 pass 卷返回 []。"""
+    aligned = jp_align.aligned_vols(jp_root).get(vol.split("]")[0].strip("["))
+    if aligned is None:
+        return []
+    out = []
+    for name, lineno in line_hits(x_dir, vol, needle)[:5]:
+        unit = jp_align.unit_code(name)
+        if not unit:
+            continue
+        got = jp_align.jp_at(aligned, unit, lineno)
+        if got:
+            out.append(f"{unit} L{lineno} :: {got['jp'][:80]}")
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -163,6 +192,8 @@ def main() -> None:
         for label, side_root in sides:
             for hit in vol_contexts(side_root, vol, n.cn):
                 print(f"  [{label}] {hit}")
+        for hit in jp_direct(args.jp_root, vol, n.cn, ROOT / "index-X" / "EPUB"):
+            print(f"  [JP直读] {hit}")
         if n.jp:
             for hit in jp_contexts(args.jp_root, vol, n.jp):
                 print(f"  [JP] {hit}")

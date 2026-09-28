@@ -32,9 +32,12 @@ import sys
 import unicodedata
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import jp_align
 from lib_triage import repo_root, triage_parser
 
 CHUNK = 50  # 每任务块数
@@ -175,29 +178,12 @@ def vol_code(rel_file: str) -> str:
 
 def aligned_vols(root: str) -> dict[str, str]:
     """index-jp bw_aligned 管线 pass 卷：卷码 → 对齐单元目录（行号与译文一一对应）。"""
-    base = os.path.normpath(os.path.join(root, JP_REPO, ".cache", "bw_aligned"))
-    mf = os.path.join(base, "manifest.json")
-    if not os.path.exists(mf):
-        return {}
-    with open(mf, encoding="utf-8") as f:
-        m = json.load(f)
-    return {v: os.path.join(base, v) for v, r in m.items() if r.get("status") == "pass"}
-
-
-UNIT_RE = re.compile(r"(S\d+_\d+(?:_\d+)?|S6_\d{2}\.\d{2}\.\d{2})-(\d+)", re.IGNORECASE)
-
-
-def unit_code(rel_file: str) -> str | None:
-    """译文 rel 路径 → 内容序单元码（S3_04-09）。"""
-    m = UNIT_RE.search(os.path.basename(rel_file))
-    return f"{m.group(1).upper()}-{m.group(2)}" if m else None
-
-
-def strip_line(line: str) -> str:
-    """单行 xhtml → 剥 <rt>/标签、归并空白的纯文本（与 jp_text 口径一致）。"""
-    p = TextOnly()
-    p.feed(line)
-    return re.sub(r"\s+", "", "".join(p.parts))
+    return {
+        v: str(p)
+        for v, p in jp_align.aligned_vols(
+            Path(os.path.normpath(os.path.join(root, JP_REPO)))
+        ).items()
+    }
 
 
 def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] | None:
@@ -209,7 +195,7 @@ def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] |
     locs = []
     for rel in b["files"]:
         vol = vol_code(rel)
-        unit = unit_code(rel)
+        unit = jp_align.unit_code(rel)
         xfile = os.path.join(
             root,
             "index-X",
@@ -219,14 +205,12 @@ def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] |
             "Text",
             os.path.basename(rel),
         )
-        jpfile = os.path.join(aligned.get(vol, ""), f"{unit}.xhtml")
-        if not unit or vol not in aligned or not os.path.exists(jpfile):
+        if not unit or vol not in aligned:
             return None
         with open(xfile, encoding="utf-8") as f:
-            xlines = f.read().splitlines()
-        with open(jpfile, encoding="utf-8") as f:
-            jplines = f.read().splitlines()
-        if len(xlines) != len(jplines):
+            xlines = [jp_align.strip_line(ln) for ln in f.read().splitlines()]
+        jplines = jp_align.unit_stripped_lines(aligned[vol], unit)
+        if jplines is None or len(xlines) != len(jplines):
             return None
         anchors = sorted(
             (
@@ -238,26 +222,14 @@ def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] |
             key=len,
             reverse=True,
         )
-        hit = -1
-        for a in anchors:
-            found = [i for i, ln in enumerate(xlines) if a in strip_line(ln)]
-            if len(found) == 1:
-                hit = found[0]
-                break
-        if hit < 0:
+        hit = jp_align.locate(xlines, anchors)
+        if hit is None:
             return None
-        ctx = []
-        for k in range(max(0, hit - 2), min(len(jplines), hit + 3)):
-            t = strip_line(jplines[k])
-            if t:
-                ctx.append(f"L{k + 1}: {t}")
+        got = jp_align.jp_at(aligned[vol], unit, hit)
+        if got is None:
+            return None
         locs.append(
-            {
-                "file": rel,
-                "line": hit + 1,
-                "jp": strip_line(jplines[hit]),
-                "context": ctx,
-            }
+            {"file": rel, "line": hit, "jp": got["jp"], "context": got["context"]}
         )
     return locs
 
@@ -277,7 +249,7 @@ def build_aligned_text(root: str, vols: list[str], aligned: dict) -> dict[str, s
             unit = os.path.splitext(f)[0]
             with open(os.path.join(aligned[vol], f), encoding="utf-8") as fh:
                 for n, ln in enumerate(fh.read().splitlines(), 1):
-                    t = strip_line(ln)
+                    t = jp_align.strip_line(ln)
                     if t:
                         lines.append(f"〔{unit} L{n:04d}〕{t}")
         paths[vol] = os.path.join(out_dir, f"{vol}.aligned.txt")

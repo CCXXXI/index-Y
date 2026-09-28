@@ -26,6 +26,9 @@ from pathlib import Path
 from tqdm import tqdm
 
 ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import jp_align
+
 TEXT_EXT = (".xhtml", ".html", ".htm")
 
 
@@ -104,6 +107,9 @@ def main() -> int:
         if any(f.get("jp_evidence") or f.get("jp") for f in findings)
         else ""
     )
+    if jp:
+        # pass 卷并入行号对齐语料（子代理行号直读引文同样逐字可验）
+        jp += "\n" + jp_align.aligned_corpus(args.jp_root, vol.split("]")[0].strip("["))
 
     line_cache: dict[str, list[str]] = {}
 
