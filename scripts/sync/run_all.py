@@ -45,6 +45,7 @@ def finish() -> None:
     run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
     if not git_ok("status", "--porcelain", "-z", "--", "rules/").stdout:
         run("triage_text.py", "--commit")
+        run("check_y_jp_alignment.py")
         return
     # rules/ 有在途改动：先 stash 规则落纯上游形态的原子同步提交，再恢复规则
     # 并重渲染——随后的规则提交（rules/ 与 Y 侧规则效果同 commit）diff 即生效形态
@@ -63,6 +64,7 @@ def finish() -> None:
                 f"{r.stdout}{r.stderr}"
             )
     run("x2y.py")  # 恢复在途规则后重渲染：Y 侧相对 HEAD 只剩规则效果
+    run("check_y_jp_alignment.py")  # Y 与 JP 行结构一致性门禁（bw_aligned pass 卷）
     left = [e for e in git_ok("status", "--porcelain", "-z").stdout.split("\0") if e]
     listing = "\n".join(f"  {e[:2]} {e[3:]}" for e in left)
     raise SystemExit(
@@ -134,6 +136,7 @@ def main() -> None:
     if args.sync is not None:
         update_x(args.sync or None)
     run("check_y_freshness.py")
+    run("check_y_jp_alignment.py")  # Y 与 JP 行结构一致性门禁（bw_aligned pass 卷）
     run("triage_text.py")
     # 上游上下文（commit/记录预注）须在 triage_text 之后：预注基于其刚覆写
     # 的审查材料；起新轮时带 --fetch，在途重跑离线复用

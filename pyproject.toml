@@ -22,3 +22,7 @@ extend-exclude = ["index-X"]
 
 [tool.ty.src]
 exclude = ["index-X"]
+
+[tool.ty.environment]
+# 脚本运行时把 index-X/tools 挂进 sys.path 复用上游公开库（alignment_rules 等）
+extra-paths = ["index-X/tools"]
