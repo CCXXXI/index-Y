@@ -110,6 +110,7 @@ def main() -> int:
     if jp:
         # pass 卷并入行号对齐语料（子代理行号直读引文同样逐字可验）
         jp += "\n" + jp_align.aligned_corpus(args.jp_root, vol.split("]")[0].strip("["))
+    aligned_dir = jp_align.aligned_vols(args.jp_root).get(vol.split("]")[0].strip("["))
 
     line_cache: dict[str, list[str]] = {}
 
@@ -156,6 +157,15 @@ def main() -> int:
         if found_at:
             x_text = strip_cn(lines_of(x_dir, f["file"])[found_at - 1])
             f["x_same"] = x_text == strip_cn(y_lines[found_at - 1])
+            # 行号直读（pass 卷）：Y 行号 ≡ JP 行号由 check_y_jp_alignment 门禁
+            # （行数一致）与上游 check_alignment（X↔JP 位置配对）共同保证，
+            # 直接用 Y 物理行号；规则效果行同样成立（锚定法反而会巧合命中他行）
+            if aligned_dir is not None:
+                unit = jp_align.unit_code(f["file"])
+                if unit:
+                    got = jp_align.jp_at(aligned_dir, unit, found_at)
+                    if got:
+                        f["jp_direct"] = got
         else:
             f["x_same"] = None
 
