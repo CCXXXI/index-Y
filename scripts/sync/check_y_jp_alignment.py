@@ -21,7 +21,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "index-X" / "tools"))
 
 import jp_align
-from alignment_rules import PAIR_RULES, TEXTUAL_IMAGE_HEADERS
+
+# 运行时经 sys.path 挂 index-X/tools 复用上游公开库；CI 不拉 submodule，静态不可解析
+from alignment_rules import (  # ty: ignore[unresolved-import]
+    PAIR_RULES,
+    TEXTUAL_IMAGE_HEADERS,
+)
 from lib_triage import repo_root
 
 
