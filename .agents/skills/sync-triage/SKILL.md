@@ -41,9 +41,10 @@ uv run python scripts/sync/run_all.py --finish
 
 ```bash
 uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X)
+uv run python scripts/sync/check_y_jp_alignment.py   # 门禁：Y 与 JP 行结构一致（bw_aligned pass 卷）
 uv run python scripts/sync/triage_text.py            # 导出审查材料；--commit 覆盖核验 + 原子提交
 uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + records 命中预注（--fetch 起新轮）
-# --finish 等价于：check_y_freshness → triage_text --commit
+# --finish 等价于：check_y_freshness →（规则在场时延迟落地流程）→ triage_text --commit → check_y_jp_alignment
 ```
 
 脚本间共享状态在仓库根目录 `.triage/`（已 gitignore），其中脚本自管的状态文件只有
@@ -144,6 +145,13 @@ x2y.py，Y 滞后一个上游版本）。
   - 键在全卷 X 中的命中数必须恰为预期（防误伤，短键务必实测计数）。
   - 回钉/插入类规则的键不得命中旧文本（否则改写既有正确文本）；把键加长到只匹配新文本。
   - 默认写分卷规则限定作用域；跨卷通用的高置信缺陷才进 `_common.tsv`。
+- **行结构以 JP 为唯一权威**（`check_y_jp_alignment.py` 门禁强制，run_all 默认流与
+  --finish 均跑）：bw_aligned pass 卷逐单元要求 Y 文件行数 == JP 对齐单元行数。
+  回钉恢复被删内容、插入补译、删除上游误加时，值按 JP 行结构行内书写——JP 多句
+  合一段就并段，不照搬旧译的拆段（旧译拆段未必忠实 JP）。合法的结构差异豁免在上游
+  登记（PAIR_RULES、TEXTUAL_IMAGE_HEADERS），脚本自动跳过。门禁报失配时先复核 JP
+  原始页：确系规则前提错误（如误判「原文无节号」删了上游正确行）则删除该规则
+  （证伪证据写入 commit message），不改 Y 迁就规则。
 
 ### 正常性判断
 
