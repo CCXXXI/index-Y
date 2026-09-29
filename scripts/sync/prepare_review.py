@@ -337,7 +337,7 @@ def frag_top(blocks: list[dict], n: int = 15) -> None:
 
 
 def chunk_by_file(blocks: list[dict]) -> list[list[dict]]:
-    """按文件切块（每块 ≤CHUNK）；<SMALL 块的小文件按卷合并，余量合一组。"""
+    """按文件切块；<SMALL 块的小文件按卷合并，余量合一组。所有组合均 ≤CHUNK。"""
     by_file: dict[str, list[dict]] = defaultdict(list)
     for b in blocks:
         by_file[b["files"][0]].append(b)
@@ -355,11 +355,12 @@ def chunk_by_file(blocks: list[dict]) -> list[list[dict]]:
     rest = []
     for vol, bs in sorted(by_vol.items()):
         if len(bs) >= SMALL:
-            groups.append(bs)
+            for k in range(0, len(bs), CHUNK):
+                groups.append(bs[k : k + CHUNK])
         else:
             rest.extend(bs)
-    if rest:
-        groups.append(rest)
+    for k in range(0, len(rest), CHUNK):
+        groups.append(rest[k : k + CHUNK])
     return groups
 
 
