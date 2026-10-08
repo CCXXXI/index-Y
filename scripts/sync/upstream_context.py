@@ -23,6 +23,7 @@ import difflib
 import os
 import re
 import sys
+from functools import cache
 from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +58,7 @@ def vol_commits(base: str, head: str, vol: str) -> list[str]:
     return [l for l in out.decode("utf-8").splitlines() if l]
 
 
+@cache  # 同一 commit 触及多卷时在逐卷列表中重复出现
 def commit_brief(sha: str) -> tuple[str, str, str]:
     """(短 sha, 日期, subject+body)。body 原样保留（上游的差异摘要）。"""
     out = gitx("show", "-s", "--format=%h %cI%n%B", sha).decode("utf-8")
@@ -201,22 +203,66 @@ def attribute(old: str, new: str, corpus: list[CommitDiff]) -> list[CommitDiff]:
     return out
 
 
-def search_records(corpus: dict[str, str], frags: set[str]) -> list[str]:
-    """片段在全部 records 中的命中行（★ 预注行列表，限量截断）。"""
-    hits, n_rec = [], 0
-    for path, text in corpus.items():
-        if n_rec >= MAX_HIT_RECS:
-            break
-        matched = [
-            l.strip()[:MAX_LINE]
-            for l in text.splitlines()
-            if any(f in l for f in frags)
-        ]
-        if matched:
-            n_rec += 1
-            hits += [
-                f"★ {os.path.basename(path)}: {l}" for l in matched[:MAX_HIT_LINES]
-            ]
+class RecordsIndex:
+    """全部 records 的行级 trigram 倒排索引：frag → 命中行 id（语料序，逐字验证）。
+
+    search_records 每块平均数百个 frag，逐行扫全语料是 O(块×frag×行) 的三重扫描。
+    反转为「frag 定位行」：line ⊇ frag ⇒ line 含 frag 的全部 trigram，取最稀有
+    trigram 的倒排表做候选，再 `frag in line` 逐字验证（充分条件过滤，零误纳
+    零漏纳）。行 id 按（记录序, 行内序）分配，候选结果与原逐行扫描逐字节一致。
+    """
+
+    def __init__(self, corpus: dict[str, str]) -> None:
+        self.paths = list(corpus)
+        self.lines: list[str] = []
+        self.rec_of: list[int] = []
+        for i, p in enumerate(self.paths):
+            for line in corpus[p].splitlines():
+                self.rec_of.append(i)
+                self.lines.append(line)
+        postings: dict[str, list[int]] = {}
+        for lid, line in enumerate(self.lines):
+            for i in range(len(line) - 2):  # 短于 3 的行容不下任何 frag（键长 ≥3）
+                postings.setdefault(line[i : i + 3], []).append(lid)
+        self.postings = postings
+        self._cache: dict[str, tuple[int, ...]] = {}  # frag 跨块大量重复
+
+    def frag_lines(self, frag: str) -> tuple[int, ...]:
+        hit = self._cache.get(frag)
+        if hit is not None:
+            return hit
+        if len(frag) < 3:  # windows_of 不产出（键长 ≥3），防御性全扫保语义
+            hit = tuple(lid for lid, t in enumerate(self.lines) if frag in t)
+        else:
+            grams = (frag[i : i + 3] for i in range(len(frag) - 2))
+            best = min(grams, key=lambda g: len(self.postings.get(g, ())))
+            hit = tuple(
+                lid for lid in self.postings.get(best, ()) if frag in self.lines[lid]
+            )
+        if len(self._cache) < 500_000:  # 上限防长轮次内存膨胀
+            self._cache[frag] = hit
+        return hit
+
+
+def search_records(idx: RecordsIndex, frags: set[str]) -> list[str]:
+    """片段在全部 records 中的命中行（★ 预注行列表，限量截断）。
+
+    行 id 随（记录序, 行内序）单调，排序遍历与原「逐记录逐行扫描、命中
+    MAX_HIT_RECS 条记录即停」的输出逐字节一致。
+    """
+    hits, per_rec, prev = [], {}, -1
+    for lid in sorted({l for f in frags for l in idx.frag_lines(f)}):
+        r = idx.rec_of[lid]
+        if r != prev:
+            if len(per_rec) >= MAX_HIT_RECS:
+                break
+            prev = r
+        if per_rec.get(r, 0) >= MAX_HIT_LINES:
+            continue
+        per_rec[r] = per_rec.get(r, 0) + 1
+        hits.append(
+            f"★ {os.path.basename(idx.paths[r])}: {idx.lines[lid].strip()[:MAX_LINE]}"
+        )
     return hits
 
 
@@ -234,6 +280,7 @@ def annotate(
         return 0, 0
     with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
+    idx = RecordsIndex(corpus)
     out: list[str] = []
     n_commit, n_records = 0, 0
     old: list[str] = []
@@ -255,7 +302,7 @@ def annotate(
                     out.append(f"★ commit …共 {len(at)} 个，详见 upstream_context.txt")
             else:
                 out.append("★ commit: 未定位")
-        hits = search_records(corpus, windows_of(o_text, n_text))
+        hits = search_records(idx, windows_of(o_text, n_text))
         out.extend(hits)
         n_records += bool(hits)
         old.clear()
