@@ -366,18 +366,40 @@ def chunk_by_file(blocks: list[dict]) -> list[list[dict]]:
 
 def chunk(blocks: list[dict]) -> list[list[dict]]:
     """切块：同形态簇（≥CLUSTER_MIN 块共享同一 diff 片段序列 = 同一批量
-    替换波）整簇成任务不拆分（超 CHUNK 才切）；其余按文件切块。"""
+    替换波）整簇不拆分；簇按大到小 first-fit 装箱（每任务 ≤CHUNK，一任务
+    可多簇——clusters 字段由任务内实际块重建，提示词逐簇处理不受影响），
+    超 CHUNK 的簇独占任务并切分；非簇散块按文件切块。
+
+    装箱动机：子代理固定开销（提示词+语料+自检）按任务计，3 块簇任务与
+    50 块任务同价（2026.10.08 轮实测 ≈1%/任务）——小簇各自独立成任务
+    会按簇数倍费额度（该轮 136 簇任务装箱后仅需 21 个）。
+    """
     by_shape: dict[tuple, list[dict]] = defaultdict(list)
     for b in blocks:
         by_shape[block_frags(b)].append(b)
     groups = []
     small = []
+    packable = []
     for _shape, bs in sorted(by_shape.items(), key=lambda kv: -len(kv[1])):
-        if len(bs) >= CLUSTER_MIN:
-            for k in range(0, len(bs), CHUNK):
+        if len(bs) < CLUSTER_MIN:
+            small.extend(bs)
+        elif len(bs) > CHUNK:
+            for k in range(0, len(bs), CHUNK):  # 超 CHUNK 的簇被迫切分
                 groups.append(bs[k : k + CHUNK])
         else:
-            small.extend(bs)
+            packable.append(bs)
+    bins: list[list[dict]] = []
+    room: list[int] = []
+    for bs in packable:  # 已按簇大到小排序（first-fit decreasing）
+        for i, r in enumerate(room):
+            if r >= len(bs):
+                bins[i].extend(bs)
+                room[i] -= len(bs)
+                break
+        else:
+            bins.append(list(bs))
+            room.append(CHUNK - len(bs))
+    groups.extend(bins)
     groups.extend(chunk_by_file(small))
     return groups
 
