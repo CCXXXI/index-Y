@@ -425,6 +425,96 @@ def chunk(blocks: list[dict]) -> list[list[dict]]:
     return groups
 
 
+def write_task(
+    root: str,
+    triage: str,
+    n: int,
+    bs: list[dict],
+    xdirs: dict,
+    aligned: dict,
+    aligned_paths: dict[str, str],
+    jp_paths: dict[str, str],
+    missing_exempt: list[str],
+) -> int:
+    """写单个审查任务的 chunk JSON + 提示词；返回本任务 jp_loc 挂载块数。
+
+    逐块挂 jp_loc（行号直读）：全定位 = 纯直读提示词；部分定位 = 混合
+    （HYBRID_NOTE）；零定位 = 关键词检索提示词。chunk/prompt 目录下对应
+    task_NN 旧文件被覆写；verdict 目录只拼路径不写文件。
+    """
+    chunk_dir = os.path.join(triage, "review_chunks")
+    prompt_dir = os.path.join(triage, "review_prompts")
+    verdict_dir = os.path.join(triage, "verdicts")
+    vols_n = sorted({vol_code(b["files"][0]) for b in bs})
+    files = sorted({f for b in bs for f in b["files"]})
+    shapes_in: dict[tuple, list[int]] = defaultdict(list)
+    for b in bs:
+        shapes_in[block_frags(b)].append(b["id"])
+    clusters = [
+        {"shape": [[a, x] for a, x in s], "ids": ids}
+        for s, ids in shapes_in.items()
+        if len(ids) >= CLUSTER_MIN
+    ]
+    n_loc = 0
+    for b in bs:
+        loc = locate_block(root, xdirs, aligned, b)
+        if loc is not None:
+            b["jp_loc"] = loc
+            n_loc += 1
+    task_json = os.path.join(chunk_dir, f"task_{n:02d}.json")
+    out_jsonl = os.path.join(verdict_dir, f"task_{n:02d}.jsonl")
+    with open(task_json, "w", encoding="utf-8") as f:
+        json.dump(
+            {"vols": vols_n, "files": files, "blocks": bs, "clusters": clusters},
+            f,
+            ensure_ascii=False,
+            indent=1,
+        )
+    if n_loc == len(bs):
+        jp_lines = "\n".join(
+            f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
+        )
+        prompt = PROMPT_ALIGNED
+    else:
+        jp_lines = "\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
+        prompt = PROMPT
+        if n_loc:
+            prompt += HYBRID_NOTE.replace(
+                "@ALIGNED_TXT@",
+                "\n".join(
+                    f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
+                ),
+            )
+    ex_n = [v for v in vols_n if v in missing_exempt]
+    if ex_n:
+        prompt += EXEMPT_NOTE.replace("@EXEMPT_VOLS@", "、".join(ex_n))
+    if clusters:
+        prompt += CLUSTER_NOTE
+    prompt += (
+        f"\n\n任务：审查 {task_json} 的 @N@ 个块，verdict 逐块写入 "
+        f"{out_jsonl}（UTF-8 每块一行），全部审完后自检：行数==@N@、"
+        "每行 JSON 可解析、id 无重复无遗漏。"
+    )
+    prompt = (
+        prompt.replace("@JP_TXT@", jp_lines)
+        .replace("@JP_TXT_FIRST@", jp_paths.get(vols_n[0], "<缺原文卷>"))
+        .replace("@N@", str(len(bs)))
+    )
+    with open(os.path.join(prompt_dir, f"task_{n:02d}.md"), "w", encoding="utf-8") as f:
+        f.write(prompt)
+    cl = "、".join(str(len(c["ids"])) for c in clusters)
+    print(
+        f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块"
+        + (
+            "（行号直读）"
+            if n_loc == len(bs)
+            else (f"（直读 {n_loc}/{len(bs)}）" if n_loc else "")
+        )
+        + (f"（簇 {cl}）" if cl else "")
+    )
+    return n_loc
+
+
 def main() -> int:
     parser = triage_parser(__doc__)
     parser.add_argument(
@@ -543,81 +633,20 @@ def main() -> int:
             )
     n_loc_all = 0
     for n, bs in enumerate(groups, start=start_n):
-        vols_n = sorted({vol_code(b["files"][0]) for b in bs})
-        files = sorted({f for b in bs for f in b["files"]})
-        shapes_in: dict[tuple, list[int]] = defaultdict(list)
-        for b in bs:
-            shapes_in[block_frags(b)].append(b["id"])
-        clusters = [
-            {"shape": [[a, x] for a, x in s], "ids": ids}
-            for s, ids in shapes_in.items()
-            if len(ids) >= CLUSTER_MIN
-        ]
-        # 行号直读逐块挂载：定位成功的块带 jp_loc（免检索直读），
-        # 未定位块同任务内走关键词检索（全定位 = 纯直读任务）。
-        n_loc = 0
-        for b in bs:
-            loc = locate_block(root, xdirs, aligned, b)
-            if loc is not None:
-                b["jp_loc"] = loc
-                n_loc += 1
-        n_loc_all += n_loc
-        task_json = os.path.join(chunk_dir, f"task_{n:02d}.json")
-        out_jsonl = os.path.join(verdict_dir, f"task_{n:02d}.jsonl")
-        with open(task_json, "w", encoding="utf-8") as f:
-            json.dump(
-                {"vols": vols_n, "files": files, "blocks": bs, "clusters": clusters},
-                f,
-                ensure_ascii=False,
-                indent=1,
-            )
-        if n_loc == len(bs):
-            jp_lines = "\\n".join(
-                f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
-            )
-            prompt = PROMPT_ALIGNED
-        else:
-            jp_lines = "\\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
-            prompt = PROMPT
-            if n_loc:
-                prompt += HYBRID_NOTE.replace(
-                    "@ALIGNED_TXT@",
-                    "\\n".join(
-                        f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
-                    ),
-                )
-        ex_n = [v for v in vols_n if v in missing_exempt]
-        if ex_n:
-            prompt += EXEMPT_NOTE.replace("@EXEMPT_VOLS@", "、".join(ex_n))
-        if clusters:
-            prompt += CLUSTER_NOTE
-        prompt += (
-            f"\n\n任务：审查 {task_json} 的 @N@ 个块，verdict 逐块写入 "
-            f"{out_jsonl}（UTF-8 每块一行），全部审完后自检：行数==@N@、"
-            "每行 JSON 可解析、id 无重复无遗漏。"
-        )
-        prompt = (
-            prompt.replace("@JP_TXT@", jp_lines)
-            .replace("@JP_TXT_FIRST@", jp_paths.get(vols_n[0], "<缺原文卷>"))
-            .replace("@N@", str(len(bs)))
-        )
-        with open(
-            os.path.join(prompt_dir, f"task_{n:02d}.md"), "w", encoding="utf-8"
-        ) as f:
-            f.write(prompt)
-        cl = "、".join(str(len(c["ids"])) for c in clusters)
-        print(
-            f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块"
-            + (
-                "（行号直读）"
-                if n_loc == len(bs)
-                else (f"（直读 {n_loc}/{len(bs)}）" if n_loc else "")
-            )
-            + (f"（簇 {cl}）" if cl else "")
+        n_loc_all += write_task(
+            root,
+            triage,
+            n,
+            bs,
+            xdirs,
+            aligned,
+            aligned_paths,
+            jp_paths,
+            missing_exempt,
         )
     n_blocks = sum(len(g) for g in groups)
     print(
-        f"行号直读挂载：{n_loc_all}/{n_blocks} 块（{n_loc_all / max(n_blocks, 1):.1%}）"
+        f"行号直读挂载：{n_loc_all}/{n_blocks} 块（{n_loc_all / max(n_blocks, 1):.1%}）",
     )
     print(
         f"\n提示词已写入 {os.path.relpath(prompt_dir, root)}/"
