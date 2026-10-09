@@ -8,8 +8,12 @@
 - review_blocks.json：去重块列表（含 id，verdict 以 id 关联）
 - jp_text/<卷号>.txt：../index-jp 对应卷的纯文本（剥 <rt>/标签、归并空白，
   每页一行前缀〔p-NNN〕）；index-jp 缺卷时列出并警告（报用户补充原文）
-- review_chunks/task_NN.json：每任务约 50 块；<20 块的小文件按卷合并成组
+- review_chunks/task_NN.json：每任务约 50 块（同形态簇整簇不拆分装箱）；
+  逐块挂载 jp_loc（bw_aligned pass 卷行号直读，定位失败块走关键词检索）
 - review_prompts/task_NN.md：可直接粘贴给 delegate_task 的完整提示词
+
+--pending：审查在途时消费 verdicts/ 已完成块 id，只对未审块重新切块
+（任务编号续排、已完成任务档案保留），用于审查策略调整。
 
 另打印重复片段形态 Top（同一术语对的批量替换可据此快速定位）。
 
@@ -67,6 +71,11 @@ PROMPT_ALIGNED = r"""背景：你在 index-Y 仓库（C:\Users\ccxxx\Documents\G
 输出：逐块向 verdict 文件追加一行 JSON：{"id": <块id>, "verdict": "ok"|"suspect"|"unsure"|"unlocated", "cls": "form"|"semantic", "jp": "<原文片段，form 级留空>", "reason": "<≤30字>"}。jp 字段逐字复制 jp_loc 或对齐原文文件的文本，长句省略处以 … 分段（聚合端按 … 拆分后逐段逐字子串核验，改写字词会判为疑似编造）。每审完一批就追加写盘。禁止修改仓库中除该 verdict 文件以外的任何文件。
 
 FINAL SUMMARY 要求：ok/suspect/unsure/unlocated 各多少；suspect/unsure/unlocated 的 id 各附一句话理由。"""
+
+# 混合任务附加段（任务内仅部分块带 jp_loc 时）：直读块免检索，未定位块走关键词检索。
+HYBRID_NOTE = """
+行号直读块：任务 JSON 中带 jp_loc 字段的块已完成行号对齐定位（{file（译文文件）, line（该文件中译文行号）, jp（对应的日文行剥标签文本）, context（前后行，L行号: 文本）}）——这些块直接以 jp 行对照判定，无需关键词检索；行号失配（jp 行文本与块明显无关）判 unlocated 并注明「行号失配」。不带 jp_loc 的块按上述关键词检索方法定位。verdict 的 jp 字段：直读块从 jp_loc 或对齐原文逐字复制，检索块从分页 txt 逐字复制。全卷对齐原文供扩大上下文（〔单元 L行号〕前缀）：
+@ALIGNED_TXT@"""
 
 # 豁免原文对照的任务附加段（index-jp no_original.txt 清单内卷）。
 EXEMPT_NOTE = """
@@ -186,11 +195,16 @@ def aligned_vols(root: str) -> dict[str, str]:
     }
 
 
+_XLINES_CACHE: dict[str, list[str]] = {}
+_JPLINES_CACHE: dict[tuple[str, str], list[str] | None] = {}
+
+
 def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] | None:
     """为块的每个 files 出现定位 (file, line, jp, context)；任一处失败返回 None。
 
     定位锚：块 new 文本的最长非空行（≥8 字）在 X 译文文件剥标签行中的唯一命中；
     未命中时退用 old 文本（本仓库规则改过的块在 X 侧是规则前的文本形态）。
+    xlines/jplines 按文件缓存（全语料逐块定位时同一文件只剥标签一次）。
     """
     locs = []
     for rel in b["files"]:
@@ -207,9 +221,16 @@ def locate_block(root: str, xdirs: dict, aligned: dict, b: dict) -> list[dict] |
         )
         if not unit or vol not in aligned:
             return None
-        with open(xfile, encoding="utf-8") as f:
-            xlines = [jp_align.strip_line(ln) for ln in f.read().splitlines()]
-        jplines = jp_align.unit_stripped_lines(aligned[vol], unit)
+        if xfile not in _XLINES_CACHE:
+            with open(xfile, encoding="utf-8") as f:
+                _XLINES_CACHE[xfile] = [
+                    jp_align.strip_line(ln) for ln in f.read().splitlines()
+                ]
+        xlines = _XLINES_CACHE[xfile]
+        key = (vol, unit)
+        if key not in _JPLINES_CACHE:
+            _JPLINES_CACHE[key] = jp_align.unit_stripped_lines(aligned[vol], unit)
+        jplines = _JPLINES_CACHE[key]
         if jplines is None or len(xlines) != len(jplines):
             return None
         anchors = sorted(
@@ -405,7 +426,13 @@ def chunk(blocks: list[dict]) -> list[list[dict]]:
 
 
 def main() -> int:
-    triage_parser(__doc__).parse_args()
+    parser = triage_parser(__doc__)
+    parser.add_argument(
+        "--pending",
+        action="store_true",
+        help="在途审查中重建：消费 verdicts/ 已完成块，只对未审块重新切块（任务编号续排）",
+    )
+    args = parser.parse_args()
     root = repo_root()
     triage = os.path.join(root, ".triage")
     if not os.path.exists(os.path.join(triage, "review_changes.txt")):
@@ -413,12 +440,20 @@ def main() -> int:
         return 1
 
     verdict_dir = os.path.join(triage, "verdicts")
-    if os.path.isdir(verdict_dir) and any(
-        f.endswith(".jsonl") for f in os.listdir(verdict_dir)
-    ):
+    done_ids: set[int] = set()
+    if os.path.isdir(verdict_dir):
+        for fn in os.listdir(verdict_dir):
+            if not fn.endswith(".jsonl"):
+                continue
+            with open(os.path.join(verdict_dir, fn), encoding="utf-8") as f:
+                for ln in f:
+                    if ln.strip():
+                        done_ids.add(json.loads(ln)["id"])
+    if done_ids and not args.pending:
         print(
             "错误：verdicts/ 已有审查产出（审查在途），拒绝重建任务块；"
             "先跑 aggregate_verdicts.py 聚合或人工清理"
+            "（审查策略调整、只对未审块重建时用 --pending）"
         )
         return 1
 
@@ -433,13 +468,16 @@ def main() -> int:
     # 兼容规范化块（NFKC 等价，如 ＆→&）自动判 ok，不占用子代理任务块
     auto = [b for b in blocks if compat_only(b)]
     review = [b for b in blocks if not compat_only(b)]
-    if auto:
+    if auto and not args.pending:  # --pending 时 auto.jsonl 已在首轮写入且 id 计入 done
         shapes = Counter(block_frags(b) for b in auto)
         top = "、".join(
             f"{' | '.join(f'{a}→{x}' for a, x in fs)}×{c}"
             for fs, c in shapes.most_common(5)
         )
         print(f"兼容规范化自动放行 {len(auto)} 块（{top}）")
+    if args.pending:
+        review = [b for b in review if b["id"] not in done_ids]
+        print(f"--pending：已完成 {len(done_ids)} 块，待审 {len(review)} 块")
 
     vols = sorted({vol_code(b["files"][0]) for b in blocks})
     jp_paths, missing = build_jp_text(root, vols)
@@ -472,11 +510,22 @@ def main() -> int:
         print(f"对齐原文 {vol} -> {os.path.relpath(p, root)}")
     chunk_dir = os.path.join(triage, "review_chunks")
     prompt_dir = os.path.join(triage, "review_prompts")
-    for d in (chunk_dir, prompt_dir, verdict_dir):
-        os.makedirs(d, exist_ok=True)
-        for old in os.listdir(d):
-            os.remove(os.path.join(d, old))
-    if auto:
+    start_n = 0
+    if args.pending:  # 续排编号，保留已完成任务的 chunk/prompt/verdict 档案
+        for d in (chunk_dir, prompt_dir, verdict_dir):
+            os.makedirs(d, exist_ok=True)
+        prev = [
+            int(m.group(1))
+            for f in os.listdir(chunk_dir)
+            if (m := re.match(r"task_(\d+)\.json$", f))
+        ]
+        start_n = max(prev) + 1 if prev else 0
+    else:
+        for d in (chunk_dir, prompt_dir, verdict_dir):
+            os.makedirs(d, exist_ok=True)
+            for old in os.listdir(d):
+                os.remove(os.path.join(d, old))
+    if auto and not args.pending:
         with open(os.path.join(verdict_dir, "auto.jsonl"), "w", encoding="utf-8") as f:
             f.writelines(
                 json.dumps(
@@ -492,7 +541,8 @@ def main() -> int:
                 + "\n"
                 for b in auto
             )
-    for n, bs in enumerate(groups):
+    n_loc_all = 0
+    for n, bs in enumerate(groups, start=start_n):
         vols_n = sorted({vol_code(b["files"][0]) for b in bs})
         files = sorted({f for b in bs for f in b["files"]})
         shapes_in: dict[tuple, list[int]] = defaultdict(list)
@@ -503,19 +553,15 @@ def main() -> int:
             for s, ids in shapes_in.items()
             if len(ids) >= CLUSTER_MIN
         ]
-        # 行号直读：任务全部块落在 bw_aligned pass 卷且逐块定位成功时启用
-        use_aligned = bool(vols_n) and all(v in aligned for v in vols_n)
-        if use_aligned:
-            locs = {}
-            for b in bs:
-                loc = locate_block(root, xdirs, aligned, b)
-                if loc is None:
-                    use_aligned = False
-                    break
-                locs[b["id"]] = loc
-            if use_aligned:
-                for b in bs:
-                    b["jp_loc"] = locs[b["id"]]
+        # 行号直读逐块挂载：定位成功的块带 jp_loc（免检索直读），
+        # 未定位块同任务内走关键词检索（全定位 = 纯直读任务）。
+        n_loc = 0
+        for b in bs:
+            loc = locate_block(root, xdirs, aligned, b)
+            if loc is not None:
+                b["jp_loc"] = loc
+                n_loc += 1
+        n_loc_all += n_loc
         task_json = os.path.join(chunk_dir, f"task_{n:02d}.json")
         out_jsonl = os.path.join(verdict_dir, f"task_{n:02d}.jsonl")
         with open(task_json, "w", encoding="utf-8") as f:
@@ -525,14 +571,22 @@ def main() -> int:
                 ensure_ascii=False,
                 indent=1,
             )
-        if use_aligned:
-            jp_lines = "\n".join(
+        if n_loc == len(bs):
+            jp_lines = "\\n".join(
                 f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
             )
+            prompt = PROMPT_ALIGNED
         else:
-            jp_lines = "\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
+            jp_lines = "\\n".join(f"- {jp_paths[v]}" for v in vols_n if v in jp_paths)
+            prompt = PROMPT
+            if n_loc:
+                prompt += HYBRID_NOTE.replace(
+                    "@ALIGNED_TXT@",
+                    "\\n".join(
+                        f"- {aligned_paths[v]}" for v in vols_n if v in aligned_paths
+                    ),
+                )
         ex_n = [v for v in vols_n if v in missing_exempt]
-        prompt = PROMPT_ALIGNED if use_aligned else PROMPT
         if ex_n:
             prompt += EXEMPT_NOTE.replace("@EXEMPT_VOLS@", "、".join(ex_n))
         if clusters:
@@ -554,9 +608,17 @@ def main() -> int:
         cl = "、".join(str(len(c["ids"])) for c in clusters)
         print(
             f"task_{n:02d} [{'/'.join(vols_n)}] {len(bs)}块"
-            + ("（行号直读）" if use_aligned else "")
+            + (
+                "（行号直读）"
+                if n_loc == len(bs)
+                else (f"（直读 {n_loc}/{len(bs)}）" if n_loc else "")
+            )
             + (f"（簇 {cl}）" if cl else "")
         )
+    n_blocks = sum(len(g) for g in groups)
+    print(
+        f"行号直读挂载：{n_loc_all}/{n_blocks} 块（{n_loc_all / max(n_blocks, 1):.1%}）"
+    )
     print(
         f"\n提示词已写入 {os.path.relpath(prompt_dir, root)}/"
         "（delegate_task 每任务粘贴一份）"
