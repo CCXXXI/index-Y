@@ -7,7 +7,7 @@
 （在途审查会被新版顶掉）；另校验 HEAD 自洽（Y == x2y(X)），拦上轮改 rules/
 后漏跑 x2y.py 的陈旧 Y；在途分流中重跑不带 --sync。
 --finish（人工审查后）：check_y_freshness → triage_text --commit（原子同步
-提交，纯上游形态）；rules/ 有在途改动时自动 stash 规则 → 原子提交 → 恢复 →
+提交，纯上游形态）；rules/ 有在途改动时自动备份还原 rules/ → 原子提交 → 恢复 →
 重渲染，报告待提交清单并以非零码退出（轮次保持开放）——规则提交
 （rules/ 与 Y 侧规则效果同 commit，diff 即规则生效形态）落地后本轮才收尾。
 
@@ -16,11 +16,12 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_triage import ensure_x, pin_sha, triage_parser, x_head
+from lib_triage import ensure_x, pin_sha, repo_root, triage_parser, x_head
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,23 +48,33 @@ def finish() -> None:
         run("triage_text.py", "--commit")
         run("check_y_jp_alignment.py")
         return
-    # rules/ 有在途改动：先 stash 规则落纯上游形态的原子同步提交，再恢复规则
-    # 并重渲染——随后的规则提交（rules/ 与 Y 侧规则效果同 commit）diff 即生效形态
-    r = git_ok("stash", "push", "-u", "-m", "run_all --finish 在途规则", "--", "rules/")
-    if r.returncode != 0:
-        raise SystemExit(f"git stash push rules/ 失败：\n{r.stdout}{r.stderr}")
+    # rules/ 有在途改动：整目录备份 → 还原 HEAD 形态 → 落纯上游形态的原子同步提交
+    # → 恢复规则并重渲染——随后的规则提交（rules/ 与 Y 侧规则效果同 commit）diff 即生效形态。
+    # 不用 git stash：stash commit 记录全树（含当时 EPUB 暂存状态），pop 的合并语义会
+    # 与原子提交改过的一批 Y 文件撞出 both modified 假冲突；文件系统备份/还原无合并语义。
+    rules = os.path.join(repo_root(), "rules")
+    backup = os.path.join(repo_root(), ".triage", "rules_backup")
+    if os.path.exists(backup):
+        shutil.rmtree(backup)
+    shutil.copytree(rules, backup)
     try:
+        # 还原 rules/ 至 HEAD：卸下暂存（在途新增文件回到未跟踪）→ 恢复已跟踪 → 清除未跟踪
+        for args in (
+            ("reset", "-q", "HEAD", "--", "rules/"),
+            ("checkout", "HEAD", "--", "rules/"),
+            ("clean", "-fd", "--", "rules/"),
+        ):
+            r = git_ok(*args)
+            if r.returncode != 0:
+                raise SystemExit(f"git {' '.join(args)} 失败：\n{r.stdout}{r.stderr}")
         run("x2y.py")  # HEAD 规则重渲染：Y 回到纯上游形态
         run("triage_text.py", "--commit")
     finally:
-        r = git_ok("stash", "pop")
-        if r.returncode != 0:
-            raise SystemExit(
-                "git stash pop 失败：在途规则改动仍保留在 stash 中"
-                "（git stash list 可见，恢复后重跑 x2y.py）：\n"
-                f"{r.stdout}{r.stderr}"
-            )
-    run("x2y.py")  # 恢复在途规则后重渲染：Y 侧相对 HEAD 只剩规则效果
+        # 恢复在途规则并重渲染——无论成败都回到在途形态（x2y 幂等，兼作失败自愈）
+        shutil.rmtree(rules)
+        shutil.copytree(backup, rules)
+        shutil.rmtree(backup)
+        run("x2y.py")
     run("check_y_jp_alignment.py")  # Y 与 JP 行结构一致性门禁（bw_aligned pass 卷）
     left = [e for e in git_ok("status", "--porcelain", "-z").stdout.split("\0") if e]
     listing = "\n".join(f"  {e[:2]} {e[3:]}" for e in left)
