@@ -62,12 +62,14 @@ def resolve_vol(vol_arg: str, x_dir: Path) -> str:
 
 
 def jp_corpus(jp_root: Path, vol: str) -> str:
-    """同卷原文目录与中文卷同卷码（index-jp 侧目录名为半角 [S1_01] 形态）。"""
-    prefix = f"[{jp_align.vol_code(vol)}]"
-    dirs = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
+    """同卷原文目录与中文卷同卷码。"""
+    code = jp_align.vol_code(vol)
+    dirs = [
+        d for d in jp_root.iterdir() if d.is_dir() and jp_align.vol_code(d.name) == code
+    ]
     if not dirs:
         print(
-            f"警告：{jp_root} 下未找到 {prefix} 原文目录，jp 验证全部跳过",
+            f"警告：{jp_root} 下未找到 {code} 原文目录，jp 验证全部跳过",
             file=sys.stderr,
         )
         return ""

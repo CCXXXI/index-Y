@@ -33,10 +33,7 @@ def unit_code(name: str) -> str | None:
 
 
 def vol_code(name: str) -> str | None:
-    """卷目录名（或以其为首段的路径）→ 卷码（【S3_04】创约… → S3_04）。
-
-    中文侧目录名是全角【】形态，index-jp 侧是半角 [] 形态，均按码提取。
-    """
+    """卷目录名（或以其为首段的路径）→ 卷码（【S3_04】创约… → S3_04）。"""
     m = VOL_RE.search(str(name).replace("\\", "/").split("/")[0])
     return m.group(0).upper() if m else None
 

@@ -11,7 +11,7 @@
 - X 侧全语料计数（按卷分组）——唯一命中入分卷段，多卷复现入 `_common.tsv`；
 - 目标卷 X 与 Y 的命中上下文（保留 xhtml 标签原文，供规则旧串逐字截取）；
 - 日文原文侧命中上下文（剥 `<rt>` 注音、去标签、归并空白后搜索，
-  原文卷目录按卷码与 index-X/EPUB/ 卷目录对应，index-jp 侧为半角 `[Sx_yy]` 形态）。
+  原文卷目录按卷码与 index-X/EPUB/ 卷目录对应）。
 
 用法：uv run python scripts/proofreading_locate.py S2_01 needles.txt
 卷参数给卷目录全名或卷码（如 S2_01）均可；原文仓库默认 ../index-jp，用 --jp-root 覆盖。
@@ -97,10 +97,12 @@ def vol_contexts(root: Path, vol: str, needle: str) -> list[str]:
 
 
 def jp_contexts(jp_root: Path, vol: str, needle: str) -> list[str]:
-    prefix = f"[{jp_align.vol_code(vol)}]"
-    matches = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
+    code = jp_align.vol_code(vol)
+    matches = [
+        d for d in jp_root.iterdir() if d.is_dir() and jp_align.vol_code(d.name) == code
+    ]
     if not matches:
-        return [f"(../index-jp 无 {prefix} 对应目录）"]
+        return [f"(../index-jp 无 {code} 对应目录）"]
     hits = []
     for f in sorted(matches[0].rglob("*")):
         if f.suffix not in TEXT_EXT:
