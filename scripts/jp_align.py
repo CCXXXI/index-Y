@@ -17,16 +17,43 @@ status=pass 的卷经 check_alignment 门禁：行数/h2/图片行/br 位置全�
 import html
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 UNIT_RE = re.compile(r"(S\d+_\d+(?:_\d+)?|S6_\d{2}\.\d{2}\.\d{2})-(\d+)", re.IGNORECASE)
+# 卷码：日期形在前，防 S6_10.06.26 被 S\d+_\d+ 截成 S6_10
+VOL_RE = re.compile(r"S6_\d{2}\.\d{2}\.\d{2}|S\d+_\d+(?:_\d+)?", re.IGNORECASE)
 
 
 def unit_code(name: str) -> str | None:
     """译文文件名 → 内容序单元码（S3_04-09_Chapter4.xhtml → S3_04-09）。"""
     m = UNIT_RE.search(Path(name).name)
     return f"{m.group(1).upper()}-{m.group(2)}" if m else None
+
+
+def vol_code(name: str) -> str | None:
+    """卷目录名（或以其为首段的路径）→ 卷码（【S3_04】创约… → S3_04）。
+
+    中文侧目录名是全角【】形态，index-jp 侧是半角 [] 形态，均按码提取。
+    """
+    m = VOL_RE.search(str(name).replace("\\", "/").split("/")[0])
+    return m.group(0).upper() if m else None
+
+
+def resolve_vol(vol_arg: str, root: Path) -> str:
+    """卷参数（卷目录全名或卷码，卷码的包裹括号可省）→ root 下唯一匹配目录名。"""
+    code = vol_code(vol_arg.strip("[]【】"))
+    matches = [
+        d.name
+        for d in Path(root).iterdir()
+        if d.is_dir() and (d.name == vol_arg or (code and vol_code(d.name) == code))
+    ]
+    if len(matches) != 1:
+        sys.exit(
+            f"卷参数 {vol_arg!r} 在 {root} 下匹配到 {len(matches)} 个目录: {matches}"
+        )
+    return matches[0]
 
 
 def aligned_vols(jp_root: Path) -> dict[str, Path]:

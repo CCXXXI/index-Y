@@ -11,10 +11,10 @@
 - X 侧全语料计数（按卷分组）——唯一命中入分卷段，多卷复现入 `_common.tsv`；
 - 目标卷 X 与 Y 的命中上下文（保留 xhtml 标签原文，供规则旧串逐字截取）；
 - 日文原文侧命中上下文（剥 `<rt>` 注音、去标签、归并空白后搜索，
-  原文卷目录按 `[Sx_yy]` 前缀与 index-X/EPUB/ 卷目录对应）。
+  原文卷目录按卷码与 index-X/EPUB/ 卷目录对应，index-jp 侧为半角 `[Sx_yy]` 形态）。
 
-用法：uv run python scripts/proofreading_locate.py "[S2_01]新约 某魔法的禁书目录 01X" needles.txt
-卷参数可只给 `[Sx_yy]` 前缀；原文仓库默认 ../index-jp，用 --jp-root 覆盖。
+用法：uv run python scripts/proofreading_locate.py S2_01 needles.txt
+卷参数给卷目录全名或卷码（如 S2_01）均可；原文仓库默认 ../index-jp，用 --jp-root 覆盖。
 """
 
 import argparse
@@ -49,15 +49,8 @@ def parse_needles(path: Path) -> list[Needle]:
 
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
-    """卷参数支持全名或 `[Sx_yy]` 前缀，须唯一匹配 index-X/EPUB/ 下卷目录。"""
-    matches = [
-        d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
-    ]
-    if len(matches) != 1:
-        sys.exit(
-            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
-        )
-    return matches[0]
+    """卷参数支持全名或卷码（括号可省），须唯一匹配 index-X/EPUB/ 下卷目录。"""
+    return jp_align.resolve_vol(vol_arg, x_dir)
 
 
 def strip_jp(raw: str) -> str:
@@ -104,7 +97,7 @@ def vol_contexts(root: Path, vol: str, needle: str) -> list[str]:
 
 
 def jp_contexts(jp_root: Path, vol: str, needle: str) -> list[str]:
-    prefix = vol.split("]")[0] + "]"
+    prefix = f"[{jp_align.vol_code(vol)}]"
     matches = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
     if not matches:
         return [f"(../index-jp 无 {prefix} 对应目录）"]
@@ -131,7 +124,7 @@ def line_hits(root: Path, vol: str, needle: str) -> list[tuple[str, int]]:
 
 def jp_direct(jp_root: Path, vol: str, needle: str, x_dir: Path) -> list[str]:
     """行号直读（bw_aligned pass 卷）：X 侧命中行的同行号日文行。非 pass 卷返回 []。"""
-    aligned = jp_align.aligned_vols(jp_root).get(vol.split("]")[0].strip("["))
+    aligned = jp_align.aligned_vols(jp_root).get(jp_align.vol_code(vol))
     if aligned is None:
         return []
     out = []
@@ -149,7 +142,7 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("vol", help="目标卷（index-X/EPUB/ 下卷目录全名或 [Sx_yy] 前缀）")
+    p.add_argument("vol", help="目标卷（index-X/EPUB/ 下卷目录全名或卷码，如 S2_01）")
     p.add_argument("needles", type=Path, help="关键词清单文件（UTF-8）")
     p.add_argument("--jp-root", type=Path, default=ROOT.parent / "index-jp")
     p.add_argument(

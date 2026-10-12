@@ -41,19 +41,11 @@ def strip_cn(line: str) -> str:
 
 
 def resolve_text_dir(vol_arg: str) -> tuple[str, Path]:
-    matches = [
-        d.name
-        for d in (ROOT / "EPUB").iterdir()
-        if d.is_dir() and d.name.startswith(vol_arg)
-    ]
-    if len(matches) != 1:
-        sys.exit(
-            f"卷参数 {vol_arg!r} 在 EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
-        )
-    text_dir = ROOT / "EPUB" / matches[0] / "OEBPS" / "Text"
+    vol = jp_align.resolve_vol(vol_arg, ROOT / "EPUB")
+    text_dir = ROOT / "EPUB" / vol / "OEBPS" / "Text"
     if not text_dir.is_dir():
         sys.exit(f"正文目录不存在: {text_dir}")
-    return matches[0], text_dir
+    return vol, text_dir
 
 
 def content_files(text_dir: Path) -> list[Path]:
@@ -120,7 +112,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
+    ap.add_argument("vol", help="卷目录名或卷码（如 S1_02）")
     ap.add_argument("--target-chars", type=int, default=15000, help="每块目标字符数")
     ap.add_argument("--overlap", type=int, default=10, help="上下文重叠行数")
     ap.add_argument("--max-chunks", type=int, default=10, help="最大并行块数")
@@ -162,7 +154,7 @@ def main() -> int:
         )
         print(f"     goal: 校对通读 {goal}（约 {c.chars // 1000} 千字符）")
 
-    vol_code = vol.split("]")[0].strip("[")
+    vol_code = jp_align.vol_code(vol)
     aligned_note = ""
     if vol_code in jp_align.aligned_vols(ROOT.parent / "index-jp"):
         aligned_note = (
@@ -186,12 +178,12 @@ def main() -> int:
     if not m:
         sys.exit("模板【output_schema】节提取失败，请检查模板尾部格式")
     schema = re.sub(r"\s+", "", m.group(1))
-    vol_prefix = vol.split("]")[0]
+    vol_prefix = vol.split("】")[0] + "】"
     print("\ncontext（全部块共用，逐字复制进每个 task）:")
     print(
         f"按本仓库 .agents/skills/agent-proofread/templates/chapter-agent-prompt.md 模板执行"
         f'（先 skill_view(name="agent-proofread", file_path="templates/chapter-agent-prompt.md") 加载）：'
-        f"模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}（含左方括号）。"
+        f"模板中 {{{{VOL_PREFIX}}}} 替换为 {vol_prefix}。"
         f"goal 给出的行区间即你的校对主区间，逐行通读；疑点回原文核对用模板规定的 proofreading_locate.py 批量清单法。"
         + aligned_note
         + "final answer 严格输出模板【产出】节规定的 JSON，不要多余文字。不修改任何文件。"

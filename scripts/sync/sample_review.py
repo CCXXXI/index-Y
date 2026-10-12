@@ -21,7 +21,8 @@ import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import prepare_review as pr
+import jp_align
+import prepare_review as pr  # 其 sys.path 挂载 scripts/，jp_align 随之可导入
 from lib_triage import repo_root, triage_parser
 
 BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
@@ -173,9 +174,10 @@ def plan() -> int:
         key=lambda i: (pr.vol_code(by_id[i]["files"][0]), by_id[i]["files"][0], i),
     )
     xdirs = {
-        d.split("]")[0].strip("["): d
+        c: d
         for d in os.listdir(os.path.join(root, "index-X", "EPUB"))
-        if d.startswith("[")
+        if (c := jp_align.vol_code(d))
+        and os.path.isdir(os.path.join(root, "index-X", "EPUB", d))
     }
     aligned = pr.aligned_vols(root)
     vols = sorted({pr.vol_code(b["files"][0]) for b in blocks})
@@ -307,9 +309,10 @@ def apply() -> int:
     if escalate:
         print(f"升级子波 {len(escalate)} 个，生成全量任务：")
         xdirs = {
-            d.split("]")[0].strip("["): d
+            c: d
             for d in os.listdir(os.path.join(root, "index-X", "EPUB"))
-            if d.startswith("[")
+            if (c := jp_align.vol_code(d))
+            and os.path.isdir(os.path.join(root, "index-X", "EPUB", d))
         }
         aligned = pr.aligned_vols(root)
         vols = sorted({pr.vol_code(b["files"][0]) for b in blocks})

@@ -182,7 +182,9 @@ def page_text(path: str) -> str:
 
 
 def vol_code(rel_file: str) -> str:
-    return rel_file.split("]")[0].strip("[")
+    code = jp_align.vol_code(rel_file)
+    assert code is not None, f"路径提取不到卷码: {rel_file}"
+    return code
 
 
 def aligned_vols(root: str) -> dict[str, str]:
@@ -293,9 +295,9 @@ def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]
     """为涉及的卷生成 jp_text/<卷>.txt。返回 (卷→txt 路径, 缺原文的卷)。"""
     jp_root = os.path.normpath(os.path.join(root, JP_REPO))
     available = {
-        d.split("]")[0].strip("["): d
+        c: d
         for d in os.listdir(jp_root)
-        if d.startswith("[") and os.path.isdir(os.path.join(jp_root, d))
+        if (c := jp_align.vol_code(d)) and os.path.isdir(os.path.join(jp_root, d))
     }
     out_dir = os.path.join(root, ".triage", "jp_text")
     os.makedirs(out_dir, exist_ok=True)
@@ -574,9 +576,10 @@ def main() -> int:
     for vol, p in sorted(jp_paths.items()):
         print(f"原文 {vol} -> {os.path.relpath(p, root)}")
     xdirs = {
-        d.split("]")[0].strip("["): d
+        c: d
         for d in os.listdir(os.path.join(root, "index-X", "EPUB"))
-        if d.startswith("[")
+        if (c := jp_align.vol_code(d))
+        and os.path.isdir(os.path.join(root, "index-X", "EPUB", d))
     }
     exempt = exempt_vols(os.path.normpath(os.path.join(root, JP_REPO)))
     missing_real = [v for v in missing if v not in exempt]

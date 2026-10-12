@@ -21,6 +21,8 @@ import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import jp_align
 from lib_triage import repo_root, triage_parser
 
 
@@ -76,7 +78,8 @@ def main() -> int:
         if not jp:
             continue
         cited += 1
-        vol = want[i]["files"][0].split("]")[0].strip("[")
+        vol = jp_align.vol_code(want[i]["files"][0])
+        assert vol is not None  # 块路径必含卷码
         if vol not in jp_cache:
             # 语料 = 分页 jp_text + 行号对齐 jp_text（行号直读任务的引文来源）
             parts_src = []

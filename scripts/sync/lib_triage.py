@@ -2,7 +2,7 @@
 
 所有脚本约定：
 - 在仓库根目录运行（git rev-parse 自动定位）。
-- 全程 GIT_LITERAL_PATHSPECS=1（路径含 [方括号]，否则被当作 glob）。
+- 全程 GIT_LITERAL_PATHSPECS=1（pathspec 按字面匹配，路径元字符不被当作 glob）。
 - 解析 git 输出一律 -z。注意 rename 两路径顺序因命令而异：
   `git status --porcelain -z` 反转为 to\\0from；`git diff --name-status -z`
   与非 z 相同为 from\\0to（git 2.55 实测）。

@@ -41,7 +41,8 @@ def main() -> int:
             (
                 d
                 for d in os.listdir(y_root)
-                if d.startswith(f"[{vol}]") and os.path.isdir(os.path.join(y_root, d))
+                if jp_align.vol_code(d) == vol
+                and os.path.isdir(os.path.join(y_root, d))
             ),
             None,
         )

@@ -125,7 +125,7 @@ def y_status() -> list[tuple[str, str, str | None]]:
         st, p = e[0], e[3:]
         if st == "R":  # status -z 顺序为 to\0from
             if p.startswith("EPUB/"):
-                out.append(("R", p[5:], entries[i + 1]))
+                out.append(("R", p[5:], entries[i + 1][5:]))
             i += 2
         else:
             if p.startswith("EPUB/"):
@@ -156,10 +156,11 @@ def collect() -> dict:
             if st == "D":
                 deleted.append(rel)
                 continue
-            if st == "A" or "EPUB/" + rel not in yhm:
+            old_path = "EPUB/" + (old_rel or rel)
+            if st == "A" or old_path not in yhm:
                 new_files.append(rel)
                 continue
-            old = cf.read(yhm["EPUB/" + (old_rel or rel)])
+            old = cf.read(yhm[old_path])
             with open(os.path.join("EPUB", rel), "rb") as f:
                 new = f.read()
             ch = block_changes(old, new)
@@ -270,15 +271,17 @@ def main() -> None:
                 uncovered.append(f"EPUB/{rel}（非文本，两侧不一致）")
         else:
             uncovered.append(f"EPUB/{rel}（未入覆盖集）")
-    for line in git("status", "--porcelain").decode("utf-8").splitlines():
-        if not line or line[3:].strip('"') == X_REPO:
+    entries = git("status", "--porcelain", "-z").decode("utf-8").split("\0")
+    i = 0
+    while i < len(entries):
+        e = entries[i]
+        i += 2 if e[:1] == "R" else 1  # rename 占两槽（to\0from）
+        if not e:
             continue
-        p = line[3:].strip('"')
-        if " -> " in p:
-            p = p.split(" -> ", 1)[1]
-        if p.startswith("EPUB/"):
-            continue  # Y 侧已逐条覆盖核验
-        uncovered.append(line)
+        p = e[3:]
+        if p == X_REPO or p.startswith("EPUB/"):
+            continue  # gitlink 是本轮正常组成；Y 侧已逐条覆盖核验
+        uncovered.append(f"{e[:2]} {p}")
     if uncovered:
         print(
             "中止：以下改动未被覆盖（stray 文件/非镜像二进制等），"

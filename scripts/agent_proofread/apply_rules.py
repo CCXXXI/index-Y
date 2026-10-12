@@ -29,6 +29,9 @@ import regex as re
 from tqdm import tqdm
 
 ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import jp_align
+
 RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 HEADER = "旧\t新\t注释"
@@ -48,16 +51,7 @@ def parse_tsv(path: Path) -> list[tuple[str, str, str]]:
 
 
 def resolve_vol(vol_arg: str) -> str:
-    matches = [
-        d.name
-        for d in (ROOT / "index-X" / "EPUB").iterdir()
-        if d.is_dir() and d.name.startswith(vol_arg)
-    ]
-    if len(matches) != 1:
-        sys.exit(
-            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
-        )
-    return matches[0]
+    return jp_align.resolve_vol(vol_arg, ROOT / "index-X" / "EPUB")
 
 
 def corpus_files():
@@ -79,7 +73,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
+    ap.add_argument("vol", help="卷目录名或卷码（如 S1_02）")
     ap.add_argument("candidates", type=Path, help="候选规则 TSV（旧/新/注释）")
     ap.add_argument(
         "--replace",

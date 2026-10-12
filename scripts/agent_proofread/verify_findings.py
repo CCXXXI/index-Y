@@ -58,19 +58,12 @@ def jp_flex_ok(evidence: str, corpus: str) -> bool:
 
 
 def resolve_vol(vol_arg: str, x_dir: Path) -> str:
-    matches = [
-        d.name for d in x_dir.iterdir() if d.is_dir() and d.name.startswith(vol_arg)
-    ]
-    if len(matches) != 1:
-        sys.exit(
-            f"卷参数 {vol_arg!r} 在 index-X/EPUB/ 下匹配到 {len(matches)} 个目录: {matches}"
-        )
-    return matches[0]
+    return jp_align.resolve_vol(vol_arg, x_dir)
 
 
 def jp_corpus(jp_root: Path, vol: str) -> str:
-    """同卷原文目录名前缀与 index-X/EPUB/ 卷目录一致（如 [S1_01]）。"""
-    prefix = vol.split("]")[0] + "]"
+    """同卷原文目录与中文卷同卷码（index-jp 侧目录名为半角 [S1_01] 形态）。"""
+    prefix = f"[{jp_align.vol_code(vol)}]"
     dirs = [d for d in jp_root.iterdir() if d.is_dir() and d.name.startswith(prefix)]
     if not dirs:
         print(
@@ -90,7 +83,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("vol", help="卷目录名或 [Sx_yy] 前缀")
+    ap.add_argument("vol", help="卷目录名或卷码（如 S1_02）")
     ap.add_argument("findings", type=Path, help="findings JSON（数组）")
     ap.add_argument(
         "-o", "--out", type=Path, help="输出 JSON（默认 <findings>.verified.json）"
@@ -99,6 +92,8 @@ def main() -> int:
     args = ap.parse_args()
 
     vol = resolve_vol(args.vol, ROOT / "index-X" / "EPUB")
+    code = jp_align.vol_code(vol)
+    assert code is not None  # vol 来自 resolve_vol，必含卷码
     findings: list[dict] = json.loads(args.findings.read_text(encoding="utf-8-sig"))
     y_dir = ROOT / "EPUB" / vol
     x_dir = ROOT / "index-X" / "EPUB" / vol
@@ -109,8 +104,8 @@ def main() -> int:
     )
     if jp:
         # pass 卷并入行号对齐语料（子代理行号直读引文同样逐字可验）
-        jp += "\n" + jp_align.aligned_corpus(args.jp_root, vol.split("]")[0].strip("["))
-    aligned_dir = jp_align.aligned_vols(args.jp_root).get(vol.split("]")[0].strip("["))
+        jp += "\n" + jp_align.aligned_corpus(args.jp_root, code)
+    aligned_dir = jp_align.aligned_vols(args.jp_root).get(code)
 
     line_cache: dict[str, list[str]] = {}
 

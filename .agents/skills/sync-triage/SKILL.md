@@ -121,14 +121,12 @@ x2y.py，Y 滞后一个上游版本）。
 注意此后到规则提交落地前，审查材料会混入自己的规则效果（HEAD 自洽暂缓到收尾恢复）；
 跨轮防护不变——规则提交未落地前 `--sync` 被 update_x 拒绝。
 
-## 1. 通用 git 操作坑（本仓库路径含中文与方括号）
+## 1. 通用 git 操作坑（本仓库路径含中文）
 
-- **方括号路径**：`[S1_01]...` 会被当作 glob 字符类。所有涉及路径参数的 git 命令必须设环境变量 `GIT_LITERAL_PATHSPECS=1`。
 - **NUL 分隔**：路径含空格/中文，解析 `git status --porcelain`、`--name-status` 等输出一律加 `-z`（非 z 模式下带空格路径被引号包裹、quotepath 下非 ASCII 被八进制转义，按行解析会静默失配）。rename 的两个路径顺序**因命令而异**：`git status --porcelain -z` 反转为 `to\0from`（省略 `->`），而 `git diff --name-status -z` 与非 z 相同为 `from\0to`（git 2.55 实测，勿凭文档记忆推断）。
 - **批量读 git 对象**：逐个 `git show HEAD:path` 起上千个子进程很慢；改用 `git ls-tree -r -z HEAD` 取 path→sha 映射，再挂一个持久的 `git cat-file --batch` 进程按需读内容。
 - **带 add 副作用的助手**：`triage_text.y_status()` 自带 `git add -A`（rename 检测需要暂存口径）；`git reset` 清空索引之后不得再调它，否则刚清掉的暂存（含挂起文件）全部回归、被裸 commit 卷进去。
 - **按路径提交**：分流在途期间索引长期保持大量暂存，任何提交（含文档/脚本这类无关提交）都必须带路径限定（`git commit -m msg -- <paths>`），否则裸 `git commit` 会把全部在途暂存卷进去；`--fixup`/`--amend` 等不接受 pathspec 的形式同样吞整个索引——手写 fixup 消息再带路径（`git commit -m "fixup! <目标主题>" -- <paths>`）。工作区恢复同理：`git checkout -- <path>` 从索引恢复（拿到的是已暂存的改动），要从 HEAD 恢复用 `git checkout HEAD -- <path>`。
-- **Python 侧路径匹配**：`glob` 会把卷目录名的 `[S1_01]` 当字符类，静默匹配 0 个文件（检索假阴性）；遍历用 `os.listdir`/`os.walk` 或先 `glob.escape`。
 - **Python 生成清单喂 bash 循环**：Windows 文本模式写出 `\r\n`，`while read` 读入的路径带尾 `\r`，git 路径匹配全部失败；先 `tr -d '\r'`，或全程在 Python 内处理。
 - **cwd 漂移**：terminal 会话的 cwd 跨调用保持，`cd` 进相邻仓库后 `git show HEAD:EPUB/...` 会作用在错误仓库上（路径不存在时返回该仓库 HEAD 的提交信息而非报错，是假阳性来源）；跑仓库命令前先确认 cwd。Hermes 文件工具的相对路径同样跟随 terminal 实时 cwd。
 
