@@ -10,6 +10,7 @@
 - `scripts/proofreading_locate.py`：阅读校对定位器（关键词清单 → X 侧全语料计数、目标卷 X/Y 上下文、日文原文侧命中）。
 - `scripts/jp_align.py`：BW 行号对齐共享库（index-jp `.cache/bw_aligned` pass 卷注册表、行号直读、对齐语料；上游管线复现见 index-jp `scripts/bw_align.py`）。
 - `scripts/agent_proofread/`：agent 通读校对——`plan_chunks.py`（整卷正文切块方案）、`verify_findings.py`（子 agent 发现复核：引文/日文依据逐字验证 + X/Y 比对）、`apply_rules.py`（候选规则落分卷 TSV：归属计数、正则守卫、双模拟）。
+- `scripts/rule_jp_audit.py`：规则日文依据全量核查——生效规则×命中点采样×当前 index-jp 原文的核查单元生成（`units`）与 LLM 判定机械复核（`verify`）。
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
 - `.agents/skills/`：任务流程 project skills（`hermes skills trust <仓库路径>` 后按需加载）。
 - `../index-jp`（同级目录，如存在）：私有日文原文仓库，校对审查时读取对照，其结构与约定见该仓库 AGENTS.md（读取该目录时自动注入）。可在 `rules/` 注释中摘抄原文片段作为规则依据，但不得将其内容批量导入本仓库。无原文豁免卷清单的唯一权威是其 `no_original.txt`（prepare_review 消费）。
@@ -28,6 +29,7 @@
 - **同步上游**（index-X 推进 pin 起新轮并分流提交）：流程见 `.agents/skills/sync-triage/SKILL.md`。入口：`uv run python scripts/sync/run_all.py --sync`。
 - **阅读校对**（维护者阅读 Y 产物时记下的可疑词句）：流程见 `.agents/skills/proofreading/SKILL.md`。
 - **agent 通读校对**（子 agent 按章通读整卷 Y 产物找问题）：流程见 `.agents/skills/agent-proofread/SKILL.md`。
+- **规则日文依据核查**（index-jp 资源更新后，全量生效规则回当前原文核查）：流程见 `.agents/skills/rule-jp-audit/SKILL.md`。入口：`uv run python scripts/rule_jp_audit.py units`。
 
 ## 提交信息
 
