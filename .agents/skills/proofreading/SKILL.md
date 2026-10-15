@@ -19,4 +19,4 @@ description: "Use when 阅读校对：核实维护者阅读 Y 产物时记下的
 
 - 新串与 `_common` 正则（lookaround、删除型规则等）是否相互作用一律实测，不读正则脑补：`import` `scripts/sync/x2y.py` 的 `fixed(卷名, 候选串)` 可直接跑完整管道验证终态。
 
-提交命名 `fix: 校正 <卷标识>（N 处文本修订）`；body 附差异摘要（`旧→新`）与原文依据。
+提交命名 `fix: 校正 <卷标识>（N 处文本修订）`；body 附差异摘要（`旧→新`）与原文依据。核对无误不改的条目不写入 commit message（无 diff 可溯），在回复中说明依据即可。
