@@ -21,8 +21,9 @@ import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import jp_align
-import prepare_review as pr  # 其 sys.path 挂载 scripts/，jp_align 随之可导入
+import prepare_review as pr
 from lib_triage import repo_root, triage_parser
 
 BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
