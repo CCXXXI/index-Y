@@ -23,7 +23,8 @@ uv run python scripts/sync/run_all.py
 
 # ===== 人工审查 =====
 # 审查 .triage/review_changes.txt（Y 侧文本块 diff 聚合，★ 行为上游 commit
-# 归属与记录命中预注），
+# 归属与记录命中预注）；有新卷/新章节时另审 .triage/review_rule_fx.txt
+#（新增文件的规则生效清单，见「2. 审查材料与审查」），
 # 为可疑改动写 x2y 规则（校正或回钉，见「上游错误的规则化」），
 # 重跑 uv run python scripts/sync/x2y.py；
 # 需暂缓提交的 rel 写入挂起清单 .triage/hold.txt（见「挂起清单」）
@@ -48,7 +49,7 @@ uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + r
 ```
 
 脚本间共享状态在仓库根目录 `.triage/`（已 gitignore），其中脚本自管的状态文件只有
-`hold.txt`、`review_changes.txt`、`upstream_context.txt`、`sync_ref`，其余均为审查草稿。
+`hold.txt`、`review_changes.txt`、`review_rule_fx.txt`、`upstream_context.txt`、`sync_ref`，其余均为审查草稿。
 
 **数据模型**：`index-X/` 是上游仓库的 submodule（pin = superproject HEAD 的 gitlink，
 即上轮同步点），X 语料即其 `EPUB/` 树。X 侧「旧」= pin，「新」= submodule HEAD，轮内恒定。
@@ -64,7 +65,7 @@ freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` = Y �
 - 纯格式化/属性/版式改动（文本块零差异的文本文件）；
 - 非文本改动（css/图片/字体等，经两侧逐字节镜像校验）；
 - opf 的 `dcterms:modified` 时间戳块（机械滤除）；
-- 新增/删除文件（上游增删章节，内容审查属通读校对而非同步审查）；
+- 新增/删除文件（上游增删章节，内容审查属通读校对而非同步审查；新增文本文件的规则生效形态单列 review_rule_fx.txt 审查，见「2. 审查材料与审查」）；
 - xhtml rename：纯移动文本零差异（随原子提交），捆绑的文本改动照常进材料。
 
 **上轮分流未完成就同步新改动（跨轮残留）是安全的**：triage_text 每次运行都从实时
@@ -136,6 +137,12 @@ x2y.py，Y 滞后一个上游版本）。
 每块 `- 旧` / `+ 新` 两行（结构改动为块组多行），块尾 `★` 行是预注（上游 commit
 归属 + 上游记录命中，详见「上游记录的使用纪律」）。
 写规则需要 X 侧原文时直接在 `index-X/EPUB/<卷>/` 检索片段。
+
+`review_rule_fx.txt`：新增文本文件（新卷/新章节）的规则生效清单——新增内容未经
+审查，规则在其上的生效（旧 = X 上游原文，新 = 规则输出）按规则归组列出（出处
+行号 + 规则注释 + 聚合块与命中文件），逐条确认未误伤新内容；误伤修规则（守卫/
+作用域），重跑 `x2y.py` 与 triage_text 后本文件同步刷新（误伤生效消失）。无生效
+时文件不产出（陈旧文件自动清除）；挂起清单内新增文件的生效同样豁免。
 
 ### 上游错误的规则化
 

@@ -7,6 +7,9 @@
 check_y_freshness 门挡陈旧/直接编辑的 Y。属性/版式/图片改动不产文本块
 diff，天然不进审查；opf 时间戳块机械过滤。可疑块在审查期写成 x2y 规则
 （校正或回钉），重跑 x2y.py 后 Y 即净化——本脚本不做分类，审查即门控。
+新增文本文件（新卷/新章节）的 X→Y 规则生效形态单列 review_rule_fx.txt：
+新增内容未经审查，规则在其上的生效（按规则归组，含出处与注释）须逐条
+确认，误伤修规则后重跑 x2y.py 与本脚本同步刷新。
 
 --commit（run_all --finish 调用，前置 check_y_freshness）：
 - 非文本改动（css/图片/字体等）经两侧逐字节镜像校验后自动随原子提交入仓
@@ -23,6 +26,8 @@ import re
 import shutil
 import sys
 from collections import Counter, defaultdict
+
+import regex
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_triage import (
@@ -49,6 +54,7 @@ from lib_triage import (
 MANAGED_STATE = {
     "hold.txt",
     "review_changes.txt",
+    "review_rule_fx.txt",
     "upstream_context.txt",
     "sync_ref",
 }
@@ -111,6 +117,43 @@ def block_changes(old: bytes, new: bytes) -> list[tuple[str, str]]:
     return [(o, n) for o, n in out if not (_TS.fullmatch(o) and _TS.fullmatch(n))]
 
 
+def ordered_rules() -> tuple[dict[str, list[dict]], list[dict]]:
+    """有序规则记录：卷名 → 分卷段规则（文件内自上而下），与通用段（_common）。
+
+    管道顺序 = 分卷段先于通用段（同 x2y.fixed）。
+    """
+    import x2y  # 延迟导入：仅新增文本文件需要规则归因时才付出 ensure_x/校验开销
+
+    records = x2y.load_rule_records()
+    common = [r for r in records if r["section"] == "*"]
+    vols: dict[str, list[dict]] = defaultdict(list)
+    for r in records:
+        if r["section"] != "*":
+            vols[r["section"]].append(r)
+    return vols, common
+
+
+def rule_firings(
+    x_text: str, rules: list[dict]
+) -> tuple[list[tuple[dict, str, str]], str]:
+    """新增文本文件的规则生效模拟：按管道顺序逐条应用规则，逐条收集文本块效应。
+
+    返回 ([(规则记录, 旧块, 新块)], 终态文本)；终态应与 Y 文件一致（Y == x2y(X)）。
+    x_text 须与 x2y 同语义（文本模式读取，换行归一）；逐条归因使交叠规则
+    各归其位；仅收集产生文本块差异的生效（属性/版式改动审查天然不可见）。
+    """
+    content = x_text
+    out = []
+    for r in rules:
+        new = regex.sub(r["old"], r["new"], content)
+        if new == content:
+            continue
+        for o, n in block_changes(content.encode("utf-8"), new.encode("utf-8")):
+            out.append((r, o, n))
+        content = new
+    return out, content
+
+
 def y_status() -> list[tuple[str, str, str | None]]:
     """Y 侧在途改动（暂存口径）：[(状态, rel, 旧rel)]；状态 M/A/D/R。"""
     git("add", "-A")
@@ -137,9 +180,11 @@ def y_status() -> list[tuple[str, str, str | None]]:
 def collect() -> dict:
     """枚举 Y 侧在途改动并提取文本块 diff。
 
-    返回 {blocks, new_files, deleted, nontext, format_only}：
+    返回 {blocks, new_files, deleted, nontext, format_only, rule_fx}：
     - blocks: rel -> [(旧块, 新块)]（M/R 文本文件；rename 跨路径取旧 blob）
     - new_files/deleted: 新增/删除的文本文件 rel（随原子提交，不入块审查）
+    - rule_fx: 新增文本文件的规则生效 [(rel, 规则记录, 旧块, 新块)]
+      （旧 = X 上游原文，新 = 规则输出；新增内容未经审查，生效形态逐条审查）
     - format_only: 文本块零差异的文本文件（纯格式化/属性/版式改动，
       审查天然不可见，随原子提交）
     - nontext: 非文本改动 rel（--commit 时经镜像校验自动入仓）
@@ -147,7 +192,10 @@ def collect() -> dict:
     yhm = head_sha_map()
     cf = CatFile()
     blocks: dict[str, list[tuple[str, str]]] = {}
+    rule_fx: list[tuple[str, dict, str, str]] = []
     new_files, deleted, nontext, format_only = [], [], [], []
+    vol_rules: dict[str, list[dict]] | None = None
+    common_rules: list[dict] = []
     try:
         for st, rel, old_rel in y_status():
             if not rel.lower().endswith(TEXT_EXT):
@@ -159,6 +207,22 @@ def collect() -> dict:
             old_path = "EPUB/" + (old_rel or rel)
             if st == "A" or old_path not in yhm:
                 new_files.append(rel)
+                xp = os.path.join(X_REPO, X_PREFIX, rel)
+                if not os.path.exists(xp):
+                    print(f"警告: {rel} 无 X 侧对应文件，规则生效无法归因")
+                    continue
+                if vol_rules is None:
+                    vol_rules, common_rules = ordered_rules()
+                with open(xp, encoding="utf-8") as f:  # 文本模式读取，与 x2y 同语义
+                    fx, final = rule_firings(
+                        f.read(), vol_rules.get(rel.split("/")[0], []) + common_rules
+                    )
+                rule_fx.extend((rel, r, o, n) for r, o, n in fx)
+                with open(os.path.join("EPUB", rel), encoding="utf-8") as f:
+                    if f.read() != final:
+                        print(
+                            f"警告: {rel} 规则模拟终态与 Y 不一致（Y 滞后，先重跑 x2y.py）"
+                        )
                 continue
             old = cf.read(yhm[old_path])
             with open(os.path.join("EPUB", rel), "rb") as f:
@@ -176,6 +240,7 @@ def collect() -> dict:
         "deleted": deleted,
         "nontext": nontext,
         "format_only": format_only,
+        "rule_fx": rule_fx,
     }
 
 
@@ -212,10 +277,17 @@ def main() -> None:
     blocks = r["blocks"]
     new_files, deleted = r["new_files"], r["deleted"]
     nontext, format_only = r["nontext"], r["format_only"]
+    rule_fx = [t for t in r["rule_fx"] if t[0] not in hold]
     review_blocks = {rel: ch for rel, ch in blocks.items() if rel not in hold}
     n_blocks = sum(len(ch) for ch in review_blocks.values())
     print(f"{len(review_blocks):5d}  有文本改动的文件（待审查）")
     print(f"{n_blocks:5d}  改动块（去重前）")
+    if rule_fx:
+        fx_rules = {(t[1]["section"], t[1]["lineno"]) for t in rule_fx}
+        print(
+            f"{len(rule_fx):5d}  新增文件规则生效块（{len(fx_rules)} 条规则，"
+            "逐条审查 review_rule_fx.txt）"
+        )
     if new_files:
         print(f"{len(new_files):5d}  新增文件（随原子提交）")
     if deleted:
@@ -245,12 +317,57 @@ def main() -> None:
         f"（{sum(agg.values())} 块 / 去重 {len(agg)}）"
     )
 
+    # 新增文件规则生效清单：按规则归组（出处 + 注释 + 聚合块）。误伤修规则后
+    # 重跑 x2y.py 与本脚本同步刷新；无生效时清除陈旧文件，防误当本轮产物
+    fx_path = os.path.join(STATE_DIR, "review_rule_fx.txt")
+    if rule_fx:
+        order: list[tuple] = []
+        fx_agg: dict[tuple, Counter] = {}
+        fx_rels: dict[tuple, dict[tuple[str, str], list[str]]] = {}
+        for rel, r, o, n in rule_fx:
+            key = (
+                "_common.tsv" if r["section"] == "*" else f"{r['section']}.tsv",
+                r["lineno"],
+                r["old"],
+                r["new"],
+                r["note"],
+            )
+            if key not in fx_agg:
+                fx_agg[key] = Counter()
+                fx_rels[key] = defaultdict(list)
+                order.append(key)
+            fx_agg[key][(o, n)] += 1
+            if rel not in fx_rels[key][(o, n)]:
+                fx_rels[key][(o, n)].append(rel)
+        with open(fx_path, "w", encoding="utf-8") as f:
+            f.write(
+                "# 新增文本文件的规则生效清单（旧 = X 上游原文，新 = 规则输出）\n"
+                "# 新增卷/章节未经审查，逐条确认规则未在新内容上误伤；误伤修规则\n"
+                "# （守卫/作用域）后重跑 x2y.py 与本脚本，本文件同步刷新。\n\n"
+            )
+            for key in order:
+                src, lineno, old, new, note = key
+                f.write(
+                    f"规则 {src}:{lineno}｜{old} → {new or '（删除）'}"
+                    + (f"｜{note}" if note else "")
+                    + "\n"
+                )
+                for (o, n), c in fx_agg[key].most_common():
+                    f.write(
+                        f"[{c}次] {'、'.join(fx_rels[key][(o, n)])}\n- {o}\n+ {n}\n\n"
+                    )
+    elif os.path.exists(fx_path):
+        os.remove(fx_path)
+
     if not do_commit:
         if hold:
             print(f"挂起清单 {len(hold)} 条（{hold_path()}）")
         clean_scratch()
+        msg = "审查 review_changes.txt"
+        if rule_fx:
+            msg += "与 review_rule_fx.txt（新增文件规则生效逐条确认）"
         print(
-            "审查 review_changes.txt；可疑改动写 x2y 规则（校正或回钉旧文本），"
+            f"{msg}；可疑改动写 x2y 规则（校正或回钉旧文本），"
             "重跑 uv run python scripts/sync/x2y.py，再带 --commit 运行"
         )
         return
