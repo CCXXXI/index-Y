@@ -9,7 +9,7 @@
 - `scripts/active_rules.py`：报告范围内当前生效的 x2y 规则及首次生效点，供反馈上游。
 - `scripts/proofreading_locate.py`：阅读校对定位器（关键词清单 → X 侧全语料计数、目标卷 X/Y 上下文、日文原文侧命中）。
 - `scripts/jp_align.py`：BW 行号对齐共享库（index-jp `.cache/bw_aligned` pass 卷注册表、行号直读、对齐语料；上游管线复现见 index-jp `scripts/bw_align.py`）。
-- `scripts/agent_proofread/`：agent 通读校对——`plan_chunks.py`（整卷正文切块方案）、`verify_findings.py`（子 agent 发现复核：引文/日文依据逐字验证 + X/Y 比对）、`apply_rules.py`（候选规则落分卷 TSV：归属计数、正则守卫、双模拟）。
+- `scripts/agent_proofread/`：agent 通读校对——`plan_chunks.py`（整卷正文切块 + bw_aligned 卷中日逐行对照文件生成）、`verify_findings.py`（子 agent 发现复核：引文/日文依据逐字验证 + X/Y 比对）、`apply_rules.py`（候选规则落分卷 TSV：归属计数、正则守卫、双模拟）。
 - `scripts/rule_jp_audit.py`：规则日文依据全量核查——生效规则×命中点采样×当前 index-jp 原文的核查单元生成（`units`）与 LLM 判定机械复核（`verify`）。
 - `scripts/tag.py`：发新版本（打 tag 触发 release 编译 epub）。
 - `.agents/skills/`：任务流程 project skills（`hermes skills trust <仓库路径>` 后按需加载）。
