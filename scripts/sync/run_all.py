@@ -130,7 +130,7 @@ def main() -> None:
         nargs="?",
         const="",
         metavar="REF",
-        help="起新轮：先运行 update_x（index-X checkout 上游 ref；缺省最新 release tag）",
+        help="起新轮：先运行 update_x（index-X checkout 上游 ref；缺省 origin/master 最新 commit）",
     )
     parser.add_argument(
         "--finish",

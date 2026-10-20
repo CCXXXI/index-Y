@@ -11,7 +11,7 @@ description: "Use when 同步上游：index-X 推进 pin 起新轮并分流提�
 
 ```bash
 # ===== 起新轮：index-X checkout 上游 ref（自动跑 update_x）+ 导出审查材料 =====
-uv run python scripts/sync/run_all.py --sync        # 缺省对齐最新 release tag；--sync <REF> 指定
+uv run python scripts/sync/run_all.py --sync        # 缺省对齐 origin/master 最新 commit；--sync <REF> 指定
 # 要求工作区干净且 submodule HEAD == pin：上轮未收尾会被拒绝（在途审查会被新版顶掉）——
 # 先 --finish 收尾；确认放弃在途审查要强行并入（跨轮残留安全，见下）时，
 # 手动 uv run python scripts/sync/update_x.py [--ref REF]
@@ -97,7 +97,7 @@ freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` = Y �
 
 一轮 = 轮末一笔原子同步提交 `{gitlink 推进, 全部 Y 侧改动}`（纯上游形态，排除挂起
 清单）+ 随后的规则提交（在途 rules/ 改动与其 Y 侧规则效果同 commit，diff 即规则
-生效形态，便于人工核查）。原子提交命名 `fix: sync X/Y ← index-X@<tag>（N 文件，
+生效形态，便于人工核查）。原子提交命名 `fix: sync X/Y ← index-X@<ref>（N 文件，
 M 处文本修订）`，body 列逐文件摘要；规则提交命名 `fix: 校正…（卷清单）`，body 附
 最小差异摘要（`旧→新`）。X 是上游逐字镜像（含已鉴定并写规则的缺陷文本），Y 是
 净化产物；`check_y_freshness`（--finish 前置）保证不变式对全部文件成立。
