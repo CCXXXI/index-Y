@@ -3,7 +3,7 @@
 ## 项目结构
 
 - `index-X/`：上游 [index-X](https://github.com/1204244136/index-X)（粉丝校对版）的 submodule，pin 即同步点；其 `EPUB/` 是 X 的内容本体，`docs/maintenance-records/`（改动理由记录）、`.agents/`（术语政策）是审查参考源。只读，不在其中编辑。
-- `rules/`：x2y 规则数据（严格 TSV：首行表头 `旧<TAB>新<TAB>注释`，规则一行一条 `旧<TAB>新<TAB>注释`，注释可空；`#` 开头的行是非规则行（禁用规则、卷级说明），同样 3 字段；空行禁止）。`_common.tsv` 为全卷通用段，`<卷名>.tsv` 为分卷段（文件名 = `index-X/EPUB/` 下卷目录名，无规则的卷不建文件）。
+- `rules/`：x2y 规则数据（严格 TSV：首行表头 `旧<TAB>新<TAB>注释`，规则一行一条 `旧<TAB>新<TAB>注释`，注释可空、写依据（原文引文+理由）；`#` 开头的行是非规则行（禁用规则、卷级说明），同样 3 字段；空行禁止）。`_common.tsv` 为全卷通用段，`<卷名>.tsv` 为分卷段（文件名 = `index-X/EPUB/` 下卷目录名，无规则的卷不建文件）。
 - `EPUB/`：对 `index-X/EPUB` 运行 `scripts/sync/x2y.py` 的产物（Y）。EPUB/ 的一切内容都由 X 派生，不直接编辑。
 - `scripts/sync/`：同步并分流——`x2y.py`（X → Y 转换引擎，加载 `rules/` 并应用：分卷规则先于通用规则，文件内自上而下）、`update_x.py`（index-X fetch + checkout 上游 ref 起新轮）、`run_all.py` 驱动的分流流水线 + 共用库。
 - `scripts/active_rules.py`：报告范围内当前生效的 x2y 规则及首次生效点，供反馈上游。
