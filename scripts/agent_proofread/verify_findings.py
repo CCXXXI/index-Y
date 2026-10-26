@@ -9,9 +9,9 @@
   归并空白后做子串匹配；精确匹配失败再用「读音容忍」正则兜底——原文仓库部分
   文件的读音写在 <rt> 之外（如 巫女みこさん、瞬間錬金リメン＝マグナ），兜底正则
   允许在证据字符间插入假名/长音/＝，仅靠兜底救回的条目打 jp_flex 标记；
-- X/Y 比对：同一行 X 侧与 Y 侧剥标签文本是否一致（区分上游问题与规则引入）。
+- X/Y 比对：引文覆盖的全部物理行在 X 侧与 Y 侧剥标签文本是否一致（区分上游问题与规则引入）。
 
-只输出事实标记（quote_ok/jp_ok/x_same/found_at），不下最终判定；判定归 agent。
+只输出事实标记（quote_ok/jp_ok/x_same/found_at/found_end），不下最终判定；判定归 agent。
 
 用法：uv run python scripts/agent_proofread/verify_findings.py <卷> findings.json [-o out.json]
 """
@@ -21,6 +21,7 @@ import html
 import json
 import re
 import sys
+from bisect import bisect_right
 from pathlib import Path
 
 from tqdm import tqdm
@@ -37,6 +38,25 @@ def strip_cn(line: str) -> str:
     t = re.sub(r"<rt>(.*?)</rt>", r"\1", line, flags=re.DOTALL)
     t = re.sub(r"<[^>]+>", "", t)
     return html.unescape(re.sub(r"\s+", "", t))
+
+
+def find_quote_range(
+    lines: list[str], needle: str, *, stripped: bool
+) -> tuple[int, int] | None:
+    """在窗口内匹配单行/跨行引文，返回窗口内 1 起始、含端点的行号范围。"""
+    if not needle:
+        return None
+    parts = [strip_cn(line) for line in lines] if stripped else lines
+    separator = "" if stripped else "\n"
+    starts = []
+    offset = 0
+    for part in parts:
+        starts.append(offset)
+        offset += len(part) + len(separator)
+    found = separator.join(parts).find(needle)
+    if found < 0:
+        return None
+    return bisect_right(starts, found), bisect_right(starts, found + len(needle) - 1)
 
 
 def norm_jp(raw: str) -> str:
@@ -78,7 +98,7 @@ def jp_corpus(jp_root: Path, vol: str) -> str:
         for p in tqdm(sorted(d.rglob("*")), desc="jp 扫描"):
             if p.suffix.lower() in TEXT_EXT and p.is_file():
                 parts.append(norm_jp(p.read_text(encoding="utf-8", errors="ignore")))
-    return "".join(parts)
+    return "\n".join(parts)
 
 
 def main() -> int:
@@ -123,37 +143,49 @@ def main() -> int:
     bad_quote = bad_jp = 0
     for f in findings:
         # 归一化字段名
-        if "jp" not in f and f.get("jp_evidence"):
+        if "jp" not in f and f.get("jp_evidence") is not None:
             f["jp"] = f["jp_evidence"]
         y_lines = lines_of(y_dir, f["file"])
         ln = int(f["line"])
-        found_at = None
-        for j in range(max(0, ln - 4), min(len(y_lines), ln + 3)):
-            if f["quote"] in y_lines[j]:
-                found_at = j + 1
-                break
+        found_at = found_end = None
+        q = re.sub(r"\s+", "", f["quote"])
+        raw_lo = max(0, ln - 4)
+        raw_window = y_lines[raw_lo : min(len(y_lines), ln + 3)]
+        raw_hit = find_quote_range(raw_window, f["quote"] if q else "", stripped=False)
+        if raw_hit is not None:
+            found_at = raw_lo + raw_hit[0]
+            found_end = raw_lo + raw_hit[1]
         f["quote_ok"] = found_at is not None
         if not f["quote_ok"]:  # 剥标签容差（跨 ruby/跨行引文）
-            q = re.sub(r"\s+", "", f["quote"])
-            for j in range(max(0, ln - 6), min(len(y_lines), ln + 5)):
-                if q in strip_cn(y_lines[j]):
-                    found_at, f["quote_ok"] = j + 1, True
-                    break
+            stripped_lo = max(0, ln - 6)
+            stripped_window = y_lines[stripped_lo : min(len(y_lines), ln + 5)]
+            stripped_hit = find_quote_range(stripped_window, q, stripped=True)
+            if stripped_hit is not None:
+                found_at = stripped_lo + stripped_hit[0]
+                found_end = stripped_lo + stripped_hit[1]
+                f["quote_ok"] = True
         f["found_at"] = found_at
+        f["found_end"] = found_end
         if not f["quote_ok"]:
             bad_quote += 1
-        if f.get("jp"):
+        if f.get("jp") is not None:
             needle = norm_jp(f["jp"])
-            f["jp_ok"] = (needle in jp) if jp else None
-            if f["jp_ok"] is False and jp_flex_ok(needle, jp):
+            f["jp_ok"] = (needle in jp) if jp and needle else None
+            if not needle:
+                f["jp_ok"] = False
+            if f["jp_ok"] is False and needle and jp_flex_ok(needle, jp):
                 f["jp_ok"], f["jp_flex"] = True, True
             if f["jp_ok"] is False:
                 bad_jp += 1
         else:
             f["jp_ok"] = None
         if found_at:
-            x_text = strip_cn(lines_of(x_dir, f["file"])[found_at - 1])
-            f["x_same"] = x_text == strip_cn(y_lines[found_at - 1])
+            assert found_end is not None
+            x_lines = lines_of(x_dir, f["file"])[found_at - 1 : found_end]
+            y_quote_lines = y_lines[found_at - 1 : found_end]
+            f["x_same"] = [strip_cn(line) for line in x_lines] == [
+                strip_cn(line) for line in y_quote_lines
+            ]
             # 行号直读（pass 卷）：Y 行号 ≡ JP 行号由 check_y_jp_alignment 门禁
             # （行数一致）与上游 check_alignment（X↔JP 位置配对）共同保证，
             # 直接用 Y 物理行号；规则效果行同样成立（锚定法反而会巧合命中他行）

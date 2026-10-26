@@ -25,6 +25,7 @@ import argparse
 import html
 import json
 import sys
+from bisect import bisect_right
 from pathlib import Path
 
 import jp_align
@@ -71,30 +72,15 @@ def build_jp_blobs() -> tuple[str, str]:
                 raw = f.read_text(encoding="utf-8", errors="replace")
                 no_rt.append(strip_jp(raw))
                 rt.append(strip_jp(raw, keep_rt=True))
-    return "".join(no_rt), "".join(rt)
+    return "\n".join(no_rt), "\n".join(rt)
 
 
 # ---------- 规则命中扫描 ----------
 
 
 def literal_core(pat: str) -> str:
-    """最长无元字符连续段，做文件级预筛（近似，不处理转义细节）。"""
-    best, cur = "", ""
-    i = 0
-    while i < len(pat):
-        c = pat[i]
-        if c == "\\" and i + 1 < len(pat):
-            cur = ""
-            i += 2
-            continue
-        if META_CHAR.match(c):
-            cur = ""
-        else:
-            cur += c
-            if len(cur) > len(best):
-                best = cur
-        i += 1
-    return best
+    """可证明必选的预筛 literal；含任何正则语法时保守放弃预筛。"""
+    return "" if META_CHAR.search(pat) else pat
 
 
 def scan_hits(rules: list[dict]) -> None:
@@ -109,27 +95,33 @@ def scan_hits(rules: list[dict]) -> None:
         files = sorted(p for p in (X_DIR / vol).rglob("*") if p.suffix in TEXT_EXT)
         for p in files:
             text = p.read_text(encoding="utf-8")
-            cand = [
-                r
-                for r in vol_rules
-                if (not r["core"] or r["core"] in text) and r["rx"].search(text)
-            ]
+            cand = [r for r in vol_rules if not r["core"] or r["core"] in text]
             if not cand:
                 continue
             rel = p.relative_to(X_DIR / vol).as_posix()
-            for lineno, ln in enumerate(text.splitlines(), 1):
-                for r in cand:
-                    m = r["rx"].search(ln)
-                    if m:
-                        r["hit_list"].append(
-                            {
-                                "vol": vol,
-                                "rel": rel,
-                                "line": lineno,
-                                "pos": m.start(),
-                                "text": ln,
-                            }
-                        )
+            lines = text.splitlines()
+            line_starts = [0]
+            for line in text.splitlines(keepends=True):
+                line_starts.append(line_starts[-1] + len(line))
+            for r in cand:
+                seen_lines = set()
+                for m in r["rx"].finditer(text):
+                    line_index = bisect_right(line_starts, m.start()) - 1
+                    if not 0 <= line_index < len(lines):
+                        continue
+                    lineno = line_index + 1
+                    if lineno in seen_lines:
+                        continue
+                    seen_lines.add(lineno)
+                    r["hit_list"].append(
+                        {
+                            "vol": vol,
+                            "rel": rel,
+                            "line": lineno,
+                            "pos": m.start() - line_starts[line_index],
+                            "text": lines[line_index],
+                        }
+                    )
 
 
 # ---------- 命中采样与 jp 预取 ----------
@@ -346,6 +338,8 @@ def cmd_verify(units_path: Path, verdicts_path: Path) -> None:
         verdicts = verdicts.get("verdicts", verdicts.get("results", []))
 
     errors, seen = [], set()
+    if not units:
+        errors.append("units 为空：没有可复核的核查单元")
     aligned = jp_align.aligned_vols(JP_ROOT)
     corpus_cache: dict[str, str] = {}
 
@@ -365,10 +359,10 @@ def cmd_verify(units_path: Path, verdicts_path: Path) -> None:
         if verdict not in ("ok", "wrong", "stale_evidence", "uncertain"):
             errors.append(f"{vid}: 非法 verdict {verdict!r}")
         ev = v.get("jp_evidence")
-        if verdict in ("wrong", "stale_evidence") and not ev:
+        ev_n = re.sub(r"\s+", "", ev) if ev else ""
+        if verdict in ("wrong", "stale_evidence") and not ev_n:
             errors.append(f"{vid}: verdict={verdict} 缺 jp_evidence")
-        if ev:
-            ev_n = re.sub(r"\s+", "", ev)
+        if ev_n:
             u = units[vid]
             in_sample = any(
                 ev_n in re.sub(r"\s+", "", j["text"])
@@ -383,6 +377,8 @@ def cmd_verify(units_path: Path, verdicts_path: Path) -> None:
                 if not any(ev_n in vol_corpus(c) for c in codes):
                     errors.append(f"{vid}: jp_evidence 非所给原文逐字（疑似编造）")
     missing = set(units) - seen
+    if missing:
+        errors.extend(f"未判定: {uid}" for uid in sorted(missing))
     print(f"units={len(units)} verdicts={len(verdicts)} covered={len(seen)}")
     if missing:
         print(f"未判定 {len(missing)}: {sorted(missing)[:10]}...")

@@ -14,7 +14,8 @@ bw_aligned pass 卷（Y 物理行号 ≡ 日文对齐单元行号，由 check_y_
   Illustrations/Information/Introduction/Note/Special 等无内容序后缀）跳过；
 - 小文件合并为一块（整读）；大文件按行界切块，主区间无缝拼接，块间以
   --overlap 行互作上下文（发现只报主区间，由提示词约束）；
-- 总块数超过 --max-chunks 时自动加大目标字符数重切，直到 ≤ 上限。
+- 总块数超过 --max-chunks 时自动加大目标字符数重切；目标超过 40000 字符后停止，
+  因此 --max-chunks 是软上限而非硬上限。
 
 用法：uv run python scripts/agent_proofread/plan_chunks.py <卷> [--target-chars 12000]
 """
@@ -94,7 +95,7 @@ def plan(files: list[Path], target: int) -> list[Chunk]:
     cur = Chunk()
     for path in files:
         sizes = [
-            len(strip_cn(ln)) for ln in path.read_text(encoding="utf-8").split("\n")
+            len(strip_cn(ln)) for ln in path.read_text(encoding="utf-8").splitlines()
         ]
         total = len(sizes)
         lo = 0
@@ -113,7 +114,7 @@ def plan(files: list[Path], target: int) -> list[Chunk]:
             lo = hi
     if cur.parts:
         chunks.append(cur)
-    return chunks
+    return [chunk for chunk in chunks if chunk.chars > 0]
 
 
 def pair_lines(part: Part, aligned_dir: Path, overlap: int) -> list[str]:
@@ -192,7 +193,12 @@ def main() -> int:
         help="每块目标中文字符数（默认：对照卷 12000，未对齐卷 15000）",
     )
     ap.add_argument("--overlap", type=int, default=10, help="上下文重叠行数")
-    ap.add_argument("--max-chunks", type=int, default=10, help="最大并行块数")
+    ap.add_argument(
+        "--max-chunks",
+        type=int,
+        default=10,
+        help="并行块数软上限（默认：%(default)d；目标超过 40000 字符后停止重切）",
+    )
     args = ap.parse_args()
 
     vol, text_dir = resolve_text_dir(args.vol)

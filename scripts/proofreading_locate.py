@@ -125,7 +125,7 @@ def line_hits(root: Path, vol: str, needle: str) -> list[tuple[str, int]]:
 
 
 def jp_direct(jp_root: Path, vol: str, needle: str, x_dir: Path) -> list[str]:
-    """行号直读（bw_aligned pass 卷）：X 侧命中行的同行号日文行。非 pass 卷返回 []。"""
+    """行号直读（bw_aligned pass 卷）：所给语料侧命中行的同行号日文行。"""
     aligned = jp_align.aligned_vols(jp_root).get(jp_align.vol_code(vol))
     if aligned is None:
         return []
@@ -187,7 +187,7 @@ def main() -> None:
         for label, side_root in sides:
             for hit in vol_contexts(side_root, vol, n.cn):
                 print(f"  [{label}] {hit}")
-        for hit in jp_direct(args.jp_root, vol, n.cn, ROOT / "index-X" / "EPUB"):
+        for hit in jp_direct(args.jp_root, vol, n.cn, count_root):
             print(f"  [JP直读] {hit}")
         if n.jp:
             for hit in jp_contexts(args.jp_root, vol, n.jp):
