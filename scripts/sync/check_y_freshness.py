@@ -5,38 +5,24 @@
 退出码 0 = 新鲜；1 = 存在滞后文件（需 uv run python scripts/sync/x2y.py 后重新分流）。
 """
 
-import os
 import sys
 
-from lib_triage import TEXT_EXT, ensure_x, repo_root, triage_parser
+from lib_triage import (
+    assert_x_clean,
+    ensure_x,
+    freshness_errors,
+    repo_root,
+    triage_parser,
+)
 from x2y import fixed
 
 
 def main() -> int:
     triage_parser(__doc__).parse_args()
     ensure_x()  # submodule init + override stub（幂等）
+    assert_x_clean()  # freshness 的源必须是 HEAD，而非 tracked-dirty 工作区
     root = repo_root()
-    stale = []
-    for vol in sorted(os.listdir(os.path.join(root, "index-X", "EPUB"))):
-        vol_dir = os.path.join(root, "index-X", "EPUB", vol)
-        if not os.path.isdir(vol_dir):
-            continue
-        for dirpath, _, files in os.walk(vol_dir):
-            for name in files:
-                if not name.lower().endswith(TEXT_EXT):
-                    continue
-                xp = os.path.join(dirpath, name)
-                rel = os.path.relpath(xp, os.path.join(root, "index-X", "EPUB"))
-                yp = os.path.join(root, "EPUB", rel)
-                if not os.path.exists(yp):
-                    stale.append((rel, "Y 缺失"))
-                    continue
-                with open(xp, encoding="utf-8") as f:
-                    expect = fixed(vol, f.read())
-                with open(yp, encoding="utf-8") as f:
-                    actual = f.read()
-                if expect != actual:
-                    stale.append((rel, "内容不一致"))
+    stale = freshness_errors(root, fixed)
     if stale:
         print(f"Y 滞后: {len(stale)} 个文件与 x2y(X) 不一致")
         for rel, why in stale[:20]:

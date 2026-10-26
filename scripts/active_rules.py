@@ -127,13 +127,18 @@ def scan(vol: str, files: list[Path], seq: list[dict]) -> dict:
             for r in seq[i + 1 :]:
                 out = re.sub(r["old"], r["new"], out)
             if out != content:
+                match = next(
+                    m
+                    for m in re.finditer(seq[i]["old"], pre)
+                    if m.expand(seq[i]["new"]) != m.group(0)
+                )
                 active[i] = first_point(
                     vol,
                     fidx,
                     path,
                     original,
                     pre,
-                    re.search(seq[i]["old"], pre),
+                    match,
                     seq,
                     i,
                 )

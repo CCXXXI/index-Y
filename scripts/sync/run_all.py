@@ -6,8 +6,8 @@
 默认流程——要求工作区干净且 submodule HEAD == pin，上轮未收尾会被拒绝
 （在途审查会被新版顶掉）；另校验 HEAD 自洽（Y == x2y(X)），拦上轮改 rules/
 后漏跑 x2y.py 的陈旧 Y；在途分流中重跑不带 --sync。
---finish（人工审查后）：check_y_freshness → triage_text --commit（原子同步
-提交，纯上游形态）；rules/ 有在途改动时自动备份还原 rules/ → 原子提交 → 恢复 →
+--finish（人工审查后）：check_y_freshness → JP 门禁 → triage_text --commit
+（原子同步提交，纯上游形态）；rules/ 有在途改动时自动备份还原 rules/ → 原子提交 → 恢复 →
 重渲染，报告待提交清单并以非零码退出（轮次保持开放）——规则提交
 （rules/ 与 Y 侧规则效果同 commit，diff 即规则生效形态）落地后本轮才收尾。
 
@@ -42,21 +42,37 @@ def git_ok(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+def guard_rules_backup(root: str) -> None:
+    backup = os.path.join(root, ".triage", "rules_backup")
+    for transaction_path in (backup, backup + ".tmp"):
+        if os.path.lexists(transaction_path):
+            rel = os.path.relpath(transaction_path, root)
+            raise SystemExit(
+                f"检测到 {rel}：上次 rules 延迟提交事务可能中断。"
+                "为防覆盖唯一备份，本次已阻断；请先人工核对并恢复该备份"
+                "（不要删除），再重跑。"
+            )
+
+
 def finish() -> None:
+    root = repo_root()
+    guard_rules_backup(root)
+    backup = os.path.join(root, ".triage", "rules_backup")
+    staging = backup + ".tmp"
     run("check_y_freshness.py")  # 原子提交的不变式前提：Y == x2y(X)
     if not git_ok("status", "--porcelain", "-z", "--", "rules/").stdout:
+        run("check_y_jp_alignment.py")  # 先验证待提交的确切 Y，再允许原子提交
         run("triage_text.py", "--commit")
-        run("check_y_jp_alignment.py")
         return
     # rules/ 有在途改动：整目录备份 → 还原 HEAD 形态 → 落纯上游形态的原子同步提交
     # → 恢复规则并重渲染——随后的规则提交（rules/ 与 Y 侧规则效果同 commit）diff 即生效形态。
     # 不用 git stash：stash commit 记录全树（含当时 EPUB 暂存状态），pop 的合并语义会
     # 与原子提交改过的一批 Y 文件撞出 both modified 假冲突；文件系统备份/还原无合并语义。
-    rules = os.path.join(repo_root(), "rules")
-    backup = os.path.join(repo_root(), ".triage", "rules_backup")
-    if os.path.exists(backup):
-        shutil.rmtree(backup)
-    shutil.copytree(rules, backup)
+    rules = os.path.join(root, "rules")
+    shutil.copytree(rules, staging)
+    with open(os.path.join(staging, ".complete"), "w", encoding="utf-8") as f:
+        f.write("rules backup complete\n")
+    os.replace(staging, backup)  # 完整标记就位后才发布为正式事务备份
     try:
         # 还原 rules/ 至 HEAD：卸下暂存（在途新增文件回到未跟踪）→ 恢复已跟踪 → 清除未跟踪
         for args in (
@@ -68,13 +84,15 @@ def finish() -> None:
             if r.returncode != 0:
                 raise SystemExit(f"git {' '.join(args)} 失败：\n{r.stdout}{r.stderr}")
         run("x2y.py")  # HEAD 规则重渲染：Y 回到纯上游形态
+        run("check_y_jp_alignment.py")  # 门禁必须先于原子提交
         run("triage_text.py", "--commit")
     finally:
         # 恢复在途规则并重渲染——无论成败都回到在途形态（x2y 幂等，兼作失败自愈）
         shutil.rmtree(rules)
-        shutil.copytree(backup, rules)
-        shutil.rmtree(backup)
+        shutil.copytree(backup, rules, ignore=shutil.ignore_patterns(".complete"))
         run("x2y.py")
+        # 只有规则恢复且重渲染成功后，备份才不再是唯一副本，可以删除。
+        shutil.rmtree(backup)
     run("check_y_jp_alignment.py")  # Y 与 JP 行结构一致性门禁（bw_aligned pass 卷）
     left = [e for e in git_ok("status", "--porcelain", "-z").stdout.split("\0") if e]
     listing = "\n".join(f"  {e[:2]} {e[3:]}" for e in left)
@@ -92,6 +110,7 @@ def update_x(ref: str | None) -> None:
     跨轮残留本身是安全的（.agents/skills/sync-triage/SKILL.md），此 gate 防的是白费在途
     审查与一轮混入两个上游 delta；确认要强行并入可手动跑 update_x.py。
     """
+    guard_rules_backup(repo_root())
     r = subprocess.run(
         ["git", "status", "--porcelain", "-z"],
         capture_output=True,

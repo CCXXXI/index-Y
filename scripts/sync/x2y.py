@@ -10,8 +10,10 @@
 """
 
 import argparse
+import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import regex as re
@@ -25,11 +27,10 @@ RULES_DIR = ROOT / "rules"
 TEXT_EXT = (".xhtml", ".opf", ".ncx")
 HEADER = "旧\t新\t注释"
 
-ensure_x()  # preflight：load_rule_records 列 index-X/EPUB/ 卷目录，submodule 须先初始化
-
 
 def load_rule_records() -> list[dict]:
     """加载 rules/*.tsv 为规则记录（含出处行号）并校验；异常直接报错退出。"""
+    ensure_x()  # submodule init + override stub（幂等）
     x_vols = {p.name for p in (ROOT / "index-X" / "EPUB").iterdir() if p.is_dir()}
     records = []
     errors = []
@@ -63,6 +64,15 @@ def load_rule_records() -> list[dict]:
                 re.compile(old)
             except re.error as e:
                 errors.append(f"{tsv.name}:{lineno}: 正则编译失败: {e}")
+            else:
+                try:
+                    # 空分支提供同组数的 match，借此用 regex 自身校验 replacement。
+                    match = re.compile(old + "\n|").match("")
+                    if match is None:
+                        raise re.error("无法构造 replacement 校验匹配")
+                    match.expand(new)
+                except (re.error, IndexError) as e:
+                    errors.append(f"{tsv.name}:{lineno}: replacement 校验失败: {e}")
             records.append(
                 {
                     "section": section,
@@ -85,29 +95,53 @@ def load_rules() -> dict[str, list[tuple[str, str]]]:
     return fixes
 
 
-fixes = load_rules()
+fixes: dict[str, list[tuple[str, str]]] | None = None
 
 
 def fixed(vol: str, content: str) -> str:
-    for old, new in fixes.get(vol, []) + fixes["*"]:
+    global fixes
+    if fixes is None:
+        fixes = load_rules()
+    for old, new in fixes.get(vol, []) + fixes.get("*", []):
         content = re.sub(old, new, content)
     return content
 
 
 def x2y():
+    # fixed() 的轻量调用方只需 ensure_x stub；干净源门禁仅在直接渲染时加载。
+    from lib_triage import assert_x_clean
+
     ensure_x()  # submodule init + override stub（幂等）
+    assert_x_clean()  # 直接入口同样只从 HEAD 渲染，且在 staging 前 fail closed
     x, y = ROOT / "index-X" / "EPUB", ROOT / "EPUB"
-    if y.exists():  # 只豁免「不存在」；占用/只读等删除错误保持响亮失败
-        shutil.rmtree(y)
-    for vol in tqdm(list(x.iterdir()), "x2y"):
-        shutil.copytree(vol, y / vol.name)
-        for file in (y / vol.name).rglob("*"):
-            if file.suffix not in TEXT_EXT:
-                continue
-            with open(file, "r", encoding="utf-8") as f:
-                content = f.read()
-            with open(file, "w", encoding="utf-8", newline="") as f:
-                f.write(fixed(vol.name, content))
+    staging = Path(tempfile.mkdtemp(prefix=f".{y.name}.", dir=y.parent))
+    backup = None
+    try:
+        for vol in tqdm(list(x.iterdir()), "x2y"):
+            shutil.copytree(vol, staging / vol.name)
+            for file in (staging / vol.name).rglob("*"):
+                if file.suffix not in TEXT_EXT:
+                    continue
+                with open(file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                with open(file, "w", encoding="utf-8", newline="") as f:
+                    f.write(fixed(vol.name, content))
+        try:
+            if y.exists():
+                backup = Path(tempfile.mkdtemp(prefix=f".{y.name}.old.", dir=y.parent))
+                backup.rmdir()
+                os.replace(y, backup)
+            os.replace(staging, y)
+        except BaseException:
+            if backup is not None and not y.exists() and backup.exists():
+                os.replace(backup, y)
+            raise
+        if backup is not None:
+            shutil.rmtree(backup)
+    except BaseException:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
 
 
 if __name__ == "__main__":

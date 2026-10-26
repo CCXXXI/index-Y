@@ -1,7 +1,7 @@
 """同步上游 X：index-X submodule fetch 后 checkout 到上游 ref，重跑 x2y。
 
 上游每天对 EPUB/ 改动 force-push 日期 tag（YYYY.MM.DD）并发布 release；
-默认对齐 origin/master 最新 commit，--ref 可指定其他 ref（如 release tag 或历史 sha）。
+默认对齐 origin/master 最新 commit，--ref 可指定其他 ref；历史 sha 仅支持 pin 的后代。
 preflight（ensure_x）：submodule 未初始化则 init，override stub 缺失则补建。
 门控：submodule 工作区必须干净；submodule HEAD ≠ pin 时警告（上轮同步在途，继续
 将顶掉在途审查——确认强行并入才手动跑本脚本；run_all 已先行拒绝）。
@@ -45,6 +45,7 @@ def main() -> None:
     ref = args.ref or "origin/master"
     sha = gitx("rev-parse", ref).decode().strip()
     gitx("checkout", "-q", sha)
+    assert_x_clean(sha)  # checkout 后、渲染前再次绑定确切 HEAD 与干净源树
     tags = gitx("tag", "--points-at", "HEAD").decode().split()
     set_sync_ref(max(tags) if tags else sha[:10])
     print(f"index-X: {pin_sha()[:10]} -> {sha[:10]}（{ref}）", flush=True)

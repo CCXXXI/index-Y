@@ -25,7 +25,13 @@ def main() -> None:
     except subprocess.CalledProcessError:  # 还没有任何 tag
         last = ""
     if last and git("rev-list", "--count", f"{last}..HEAD") == "0":
-        sys.exit(f"error: 距上个 tag {last} 没有新 commits")
+        remote = git("ls-remote", "--tags", "origin", f"refs/tags/{last}")
+        if remote:
+            sys.exit(f"error: 距上个 tag {last} 没有新 commits")
+        # 上次 push 被拒或中断后，本地未发布 tag 仍指向同一 HEAD，直接重试。
+        git("push", "origin", last)
+        print(last)
+        return
     tag = datetime.now().astimezone().strftime("v%Y%m%dT%H%M")
     if tag in git("tag", "-l").splitlines():
         sys.exit(f"error: tag {tag} 已存在（同一分钟内重复运行？）")

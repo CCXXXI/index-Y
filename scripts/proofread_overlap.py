@@ -40,7 +40,7 @@ def norm(text: str) -> str:
 
 def git(repo: Path, *args: str) -> str:
     r = subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-c", "core.quotepath=false", "-C", str(repo), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -171,7 +171,7 @@ def main() -> None:
         n_line_match += 1
         x_olds, x_news = changed_spans(best.old, best.new)
         xo = [norm(s) for s in x_olds]
-        hit = any(norm(s) and norm(s) in norm(best.old) for s in y_olds)
+        hit = any(norm(s) and any(norm(s) in x_old for x_old in xo) for s in y_olds)
         if hit:
             n_span += 1
         print(f"[{idx}] {'跨度重合' if hit else '同行异改'} | Y: {ytxt}")

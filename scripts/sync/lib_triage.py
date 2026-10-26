@@ -14,6 +14,7 @@ import argparse
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from html.parser import HTMLParser
 
 ENV = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
@@ -198,10 +199,77 @@ def ensure_x() -> None:
             )
 
 
-def assert_x_clean() -> None:
-    """submodule 工作区与 HEAD 一致（防在途脏状态进入新一轮）。"""
-    gitx("diff", "--quiet", "HEAD", "--", X_PREFIX)
-    gitx("diff", "--cached", "--quiet", "--", X_PREFIX)
+def assert_x_clean(expected_head: str | None = None) -> None:
+    """X/EPUB 必须与预期 HEAD 逐字一致，且不得混入未跟踪或忽略文件。"""
+    if expected_head is not None:
+        actual_head = x_head()
+        if actual_head != expected_head:
+            raise RuntimeError(
+                f"index-X HEAD 与预期渲染源不一致：{actual_head} != {expected_head}"
+            )
+    status = gitx(
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=all",
+        "--ignored",
+        "--",
+        X_PREFIX,
+    )
+    if status:
+        entries = [e for e in status.decode("utf-8", "replace").split("\0") if e]
+        raise RuntimeError(
+            "index-X/EPUB 工作区不干净（含 tracked 改动、未跟踪或忽略文件），"
+            "渲染源必须等于 HEAD：\n" + "\n".join(entries[:20])
+        )
+
+
+def _tree_files(root: str) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for dirpath, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
+            files[rel] = path
+    return files
+
+
+def freshness_errors(
+    root: str, fixed: Callable[[str, str], str]
+) -> list[tuple[str, str]]:
+    """双向比较完整 X/Y 树，返回 (EPUB 相对路径, 原因)。
+
+    文本按 ``fixed(卷名, X 内容)`` 重算；其余文件逐字节比较。
+    此接口不访问 Git，调用方另行保证 X 工作区绑定预期 HEAD。
+    """
+    x_files = _tree_files(os.path.join(root, X_REPO, X_PREFIX))
+    y_files = _tree_files(os.path.join(root, "EPUB"))
+    errors: list[tuple[str, str]] = []
+    for rel in sorted(x_files.keys() | y_files.keys()):
+        xp = x_files.get(rel)
+        yp = y_files.get(rel)
+        if yp is None:
+            errors.append((rel, "Y 缺失"))
+            continue
+        if xp is None:
+            errors.append((rel, "Y 额外"))
+            continue
+        if os.path.splitext(rel)[1] in TEXT_EXT:
+            vol = rel.split("/", 1)[0]
+            with open(xp, encoding="utf-8") as f:
+                expect = fixed(vol, f.read())
+            with open(yp, encoding="utf-8") as f:
+                actual = f.read()
+            if expect != actual:
+                errors.append((rel, "内容不一致"))
+        else:
+            with open(xp, "rb") as f:
+                expect_bytes = f.read()
+            with open(yp, "rb") as f:
+                actual_bytes = f.read()
+            if expect_bytes != actual_bytes:
+                errors.append((rel, "二进制内容不一致"))
+    return errors
 
 
 # ---------- 挂起清单（.triage/hold.txt）----------
