@@ -16,19 +16,13 @@
 
 import json
 import os
-import re
 import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import jp_align
+import verdict_io
 from lib_triage import repo_root, triage_parser
-
-
-def norm_jp(s: str) -> str:
-    """归并空白并剥页码前缀〔…〕，供 jp 引用逐字子串比对。"""
-    return re.sub(r"〔[^〕]*〕|\s+", "", s)
 
 
 def main() -> int:
@@ -39,69 +33,20 @@ def main() -> int:
         blocks = json.load(f)
     # 兼容无 id 字段的旧格式：id 即块在材料中的位置（与 parse_blocks 一致）
     want = {b.get("id", i): b for i, b in enumerate(blocks)}
-
-    verdicts: dict[int, dict] = {}
-    bad = []
-    vdir = os.path.join(triage, "verdicts")
-    files = sorted(f for f in os.listdir(vdir) if f.endswith(".jsonl"))
-    for fname in files:
-        with open(os.path.join(vdir, fname), encoding="utf-8") as f:
-            for ln, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    v = json.loads(line)
-                except json.JSONDecodeError:
-                    bad.append(f"{fname}:{ln}: JSON 不可解析")
-                    continue
-                if v["id"] in verdicts:
-                    bad.append(f"{fname}:{ln}: 重复 id {v['id']}")
-                    continue
-                verdicts[v["id"]] = v
+    try:
+        verdicts = verdict_io.load_verdicts(triage, blocks)
+    except verdict_io.VerdictError as exc:
+        print(f"verdict 校验失败：\n{exc}")
+        return 1
 
     missing = sorted(set(want) - set(verdicts))
-    print(
-        f"块总数 {len(want)}，已收 verdict {len(verdicts)}，"
-        f"缺 {len(missing)}，坏行 {len(bad)}"
-    )
+    print(f"块总数 {len(want)}，已收 verdict {len(verdicts)}，缺 {len(missing)}")
     if missing:
         print("缺 id:", missing[:50])
-    for t in bad[:20]:
-        print("坏行", t)
+        return 1
 
-    # jp 引用真实性核验（子代理可能编造原文证据）：逐条查该卷 jp_text
-    jp_cache: dict[str, str | None] = {}
-    cited = jp_bad = 0
-    for i, v in sorted(verdicts.items()):
-        jp = v.get("jp", "")
-        if not jp:
-            continue
-        cited += 1
-        vol = jp_align.vol_code(want[i]["files"][0])
-        assert vol is not None  # 块路径必含卷码
-        if vol not in jp_cache:
-            # 语料 = 分页 jp_text + 行号对齐 jp_text（行号直读任务的引文来源）
-            parts_src = []
-            for suffix in (".txt", ".aligned.txt"):
-                p = os.path.join(triage, "jp_text", f"{vol}{suffix}")
-                if os.path.exists(p):
-                    with open(p, encoding="utf-8") as f:
-                        parts_src.append(f.read())
-            jp_cache[vol] = norm_jp("\n".join(parts_src)) if parts_src else None
-        src = jp_cache[vol]
-        if src is None:
-            bad.append(f"id {i}: 卷 {vol} 无 jp_text 而 jp 引用非空")
-            jp_bad += 1
-            continue
-        parts = [norm_jp(x) for x in re.split(r"…|\.{3}", jp) if x.strip()]
-        if any(x not in src for x in parts):
-            bad.append(f"id {i}: jp 引用不在 {vol} 原文中（疑似编造）: {jp[:60]}")
-            jp_bad += 1
-    print(f"jp 引用核验: {cited} 条, 不在原文 {jp_bad} 条")
-    for t in bad[-jp_bad:][:20] if jp_bad else []:
-        print("坏引用", t)
-
+    cited = sum(bool(v["jp"].strip()) for v in verdicts.values())
+    print(f"jp 引用核验: {cited} 条，全部有效")
     print("verdict 分布:", dict(Counter(v["verdict"] for v in verdicts.values())))
     for kind in ("suspect", "unsure", "unlocated"):
         items = [
@@ -121,7 +66,7 @@ def main() -> int:
         with open(dst, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=1)
         print(f"{kind}: {len(items)} -> {os.path.relpath(dst, root)}")
-    return 1 if (missing or bad) else 0
+    return 0
 
 
 if __name__ == "__main__":

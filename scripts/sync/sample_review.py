@@ -20,17 +20,20 @@ import re
 import sys
 from collections import Counter, defaultdict
 
+import regex
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import jp_align
 import prepare_review as pr
+import verdict_io
 from lib_triage import repo_root, triage_parser
 
-BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
-STAR_COMMIT = re.compile(r"^★ commit ([0-9a-f]{8}): ")
 K_BIG, K_MID = 8, 4  # 子波 ≥15 块抽 8；5-14 块抽 4；<5 全量
 ALNUM = re.compile(r"[^0-9A-Za-z]+")
 DUP2 = re.compile(r"([一-鿿぀-ヿ]{2})\1")
+DUP1 = re.compile(r"([一-鿿぀-ヿ])\1")
+DUP_PUNCT = regex.compile(r"(\p{P})\1")
 
 
 def red_flag(b: dict) -> str | None:
@@ -38,52 +41,27 @@ def red_flag(b: dict) -> str | None:
     old, new = b["old"], b["new"]
     if old.strip() and not new.strip():
         return "delete"
-    if ALNUM.sub("", old) != ALNUM.sub("", new) and ALNUM.sub("", old):
+    if ALNUM.sub("", old) != ALNUM.sub("", new):
         return "alnum"
-    for m in DUP2.finditer(new):
-        if m.group(0) not in old:
-            return "dup"
+    for pattern in (DUP2, DUP1, DUP_PUNCT):
+        for m in pattern.finditer(new):
+            repeated = m.group(0)
+            if new.count(repeated) > old.count(repeated):
+                return "dup"
     return None
 
 
 def load_star(triage: str, n_blocks: int) -> list[list[str]]:
-    """review_changes.txt 逐块 ★ commit 归属（与 parse_blocks 同序 = id 序）。
-
-    [X]/[Y] 结构块的 ★ 行挂其自身桶丢弃，不污染前一计数块。
-    """
-    stars: list[list[str]] = []
-    cur: list[str] | None = None
-    with open(os.path.join(triage, "review_changes.txt"), encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if BLOCK_HEAD.match(line):
-                cur = None  # 头行先收桶
-                if line.startswith("["):
-                    cur = []  # 任何头都开新桶；仅 [N次] 桶计数入列
-                    if re.match(r"^\[\d+次] ", line):
-                        stars.append(cur)
-            elif cur is not None:
-                m = STAR_COMMIT.match(line)
-                if m:
-                    cur.append(m.group(1))
-                elif line.startswith("★ commit:"):  # 未定位
-                    cur.append("NONE")
-    assert len(stars) == n_blocks, f"★ 对齐失败：{len(stars)} != {n_blocks}"
+    """从结构化 review_changes.json 读取逐块 commit 归属（与块 id 同序）。"""
+    with open(os.path.join(triage, "review_changes.json"), encoding="utf-8") as f:
+        changes = json.load(f)
+    stars = [list(change["commits"]) for change in changes]
+    assert len(stars) == n_blocks, f"commit 对齐失败：{len(stars)} != {n_blocks}"
     return stars
 
 
-def load_done(triage: str) -> set[int]:
-    done: set[int] = set()
-    vdir = os.path.join(triage, "verdicts")
-    if os.path.isdir(vdir):
-        for fn in os.listdir(vdir):
-            if not fn.endswith(".jsonl"):
-                continue
-            with open(os.path.join(vdir, fn), encoding="utf-8") as f:
-                for ln in f:
-                    if ln.strip():
-                        done.add(json.loads(ln)["id"])
-    return done
+def load_done(triage: str, blocks: list[dict]) -> set[int]:
+    return set(verdict_io.load_verdicts(triage, blocks))
 
 
 def stratified(ids: list[int], k: int) -> list[int]:
@@ -103,13 +81,40 @@ def next_task_n(triage: str) -> int:
     return max(prev) + 1 if prev else 0
 
 
+def task_assignments(triage: str, task_ids: list[int]) -> set[int]:
+    """仅读取 sample_plan 本轮抽样/升级任务；缺失文件留待重跑补建。"""
+    cdir = os.path.join(triage, "review_chunks")
+    assigned: set[int] = set()
+    for task_id in task_ids:
+        path = os.path.join(cdir, f"task_{task_id:02d}.json")
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            task = json.load(f)
+        assigned.update(b["id"] for b in task["blocks"])
+    return assigned
+
+
+def save_plan(triage: str, plan_doc: dict) -> None:
+    """原子持久化任务分配，避免崩溃后把在途升级误判为旧归档。"""
+    path = os.path.join(triage, "sample_plan.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(plan_doc, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
 def plan() -> int:
     root = repo_root()
     triage = os.path.join(root, ".triage")
     with open(os.path.join(triage, "review_blocks.json"), encoding="utf-8") as f:
         blocks = json.load(f)
+    try:
+        done = load_done(triage, blocks)
+    except verdict_io.VerdictError as exc:
+        print(f"verdict 校验失败：\n{exc}")
+        return 1
     stars = load_star(triage, len(blocks))
-    done = load_done(triage)
     pending = [b for b in blocks if b["id"] not in done]
     print(f"待审 {len(pending)} 块（已完成 {len(done)}）")
 
@@ -180,9 +185,11 @@ def plan() -> int:
         if (c := jp_align.vol_code(d))
         and os.path.isdir(os.path.join(root, "index-X", "EPUB", d))
     }
-    aligned = pr.aligned_vols(root)
-    vols = sorted({pr.vol_code(b["files"][0]) for b in blocks})
+    vols = sorted({pr.vol_code(f) for b in blocks for f in b["files"]})
     jp_paths, _missing = pr.build_jp_text(root, vols)
+    aligned = {
+        vol: path for vol, path in pr.aligned_vols(root).items() if vol not in _missing
+    }
     aligned_paths = pr.build_aligned_text(root, vols, aligned)
     exempt = pr.exempt_vols(os.path.normpath(os.path.join(root, pr.JP_REPO)))
     missing_exempt = [v for v in _missing if v in exempt]
@@ -218,6 +225,7 @@ def plan() -> int:
                 ],
                 "flagged": flagged,
                 "tasks": tasks,
+                "escalation_tasks": [],
             },
             f,
             ensure_ascii=False,
@@ -230,21 +238,30 @@ def plan() -> int:
 def apply() -> int:
     root = repo_root()
     triage = os.path.join(root, ".triage")
-    with open(os.path.join(triage, "sample_plan.json"), encoding="utf-8") as f:
-        plan_doc = json.load(f)
     with open(os.path.join(triage, "review_blocks.json"), encoding="utf-8") as f:
         blocks = json.load(f)
+    if not blocks:
+        print("审查材料 0 块，无需 apply")
+        return 0
+    with open(os.path.join(triage, "sample_plan.json"), encoding="utf-8") as f:
+        plan_doc = json.load(f)
     by_id = {b["id"]: b for b in blocks}
     vdir = os.path.join(triage, "verdicts")
-    verdicts: dict[int, dict] = {}
-    for fn in os.listdir(vdir):
-        if not fn.endswith(".jsonl"):
-            continue
-        with open(os.path.join(vdir, fn), encoding="utf-8") as f:
-            for ln in f:
-                if ln.strip():
-                    v = json.loads(ln)
-                    verdicts[v["id"]] = v
+    vols = sorted({pr.vol_code(f) for b in blocks for f in b["files"]})
+    jp_paths, missing_original = pr.build_jp_text(root, vols)
+    aligned = {
+        vol: path
+        for vol, path in pr.aligned_vols(root).items()
+        if vol not in missing_original
+    }
+    aligned_paths = pr.build_aligned_text(root, vols, aligned)
+    exempt = pr.exempt_vols(os.path.normpath(os.path.join(root, pr.JP_REPO)))
+    missing_exempt = [v for v in missing_original if v in exempt]
+    try:
+        verdicts = verdict_io.load_verdicts(triage, blocks)
+    except verdict_io.VerdictError as exc:
+        print(f"verdict 校验失败：\n{exc}")
+        return 1
 
     # 排雷块的子波归属（plan 时未记入 sampled/deferred，--apply 重算并入判定）
     stars = load_star(triage, len(blocks))
@@ -260,26 +277,46 @@ def apply() -> int:
         )
         flag_map[key].append(fid)
 
+    assigned = task_assignments(
+        triage,
+        [*plan_doc.get("tasks", []), *plan_doc.get("escalation_tasks", [])],
+    )
+
     # 升级判定：样本+本子波排雷块的 verdict；≥1 suspect 或 ≥2 非 ok → 全量深审
     escalate: list[tuple] = []
     auto_lines: dict[int, str] = {}
     missing: dict[tuple, list[int]] = {}
+    revoked_auto: set[int] = set()
     for g in plan_doc["groups"]:
         key = tuple(g["key"])
         if not g["deferred"]:
             continue  # 全量子波无放行项
-        if all(i in verdicts for i in g["deferred"]):
-            continue  # 覆盖外块已全有 verdict（升级完成后重跑 --apply 的情形）
-        judged = [i for i in g["sampled"] + flag_map.get(key, []) if i in verdicts]
-        lack = [i for i in g["sampled"] if i not in verdicts]
+        judged = sorted(
+            {i for i in g["sampled"] + flag_map.get(key, []) if i in verdicts}
+        )
+        lack = sorted(
+            {i for i in g["sampled"] + flag_map.get(key, []) if i not in verdicts}
+        )
         if lack:
             missing[key] = lack
             continue
+        if all(i in verdicts and verdicts[i]["cls"] != "auto" for i in g["deferred"]):
+            continue  # 升级块已全有实名 verdict，不再因原样本结论空转
         non_ok = [i for i in judged if verdicts[i]["verdict"] != "ok"]
         n_sus = sum(1 for i in judged if verdicts[i]["verdict"] == "suspect")
-        if n_sus >= 1 or len(non_ok) >= 2:
+        has_pending_assignment = any(
+            i not in verdicts and i in assigned for i in g["deferred"]
+        )
+        if n_sus >= 1 or len(non_ok) >= 2 or has_pending_assignment:
             escalate.append(key)
+            revoked_auto.update(
+                i
+                for i in g["deferred"]
+                if i in verdicts and verdicts[i]["cls"] == "auto"
+            )
             continue
+        if all(i in verdicts for i in g["deferred"]):
+            continue  # 覆盖外块已全有 verdict（升级完成后重跑 --apply 的情形）
         for i in g["deferred"]:
             if i in verdicts:  # 已被其他途径审过（排雷/重叠），不覆写
                 continue
@@ -298,9 +335,24 @@ def apply() -> int:
                 + "\n"
             )
     if missing:
-        print(f"以下子波样本 verdict 未齐，未放行：{len(missing)} 个")
+        print(f"以下子波样本/排雷 verdict 未齐，未放行：{len(missing)} 个")
         for key, ids in list(missing.items())[:10]:
             print(f"  {key[0]}/{key[1]}/{os.path.basename(key[2])}: 缺 {ids}")
+    if revoked_auto:
+        path = os.path.join(vdir, "auto_sample.jsonl")
+        kept = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip() and json.loads(line)["id"] not in revoked_auto:
+                    kept.append(line)
+        if kept:
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+        else:
+            os.remove(path)
+        for block_id in revoked_auto:
+            del verdicts[block_id]
+        print(f"撤销抽样自动放行并升级：{len(revoked_auto)} 块")
     if auto_lines:
         path = os.path.join(vdir, "auto_sample.jsonl")
         with open(path, "a", encoding="utf-8") as f:
@@ -315,13 +367,8 @@ def apply() -> int:
             if (c := jp_align.vol_code(d))
             and os.path.isdir(os.path.join(root, "index-X", "EPUB", d))
         }
-        aligned = pr.aligned_vols(root)
-        vols = sorted({pr.vol_code(b["files"][0]) for b in blocks})
-        jp_paths, _m = pr.build_jp_text(root, vols)
-        aligned_paths = pr.build_aligned_text(root, vols, aligned)
-        exempt = pr.exempt_vols(os.path.normpath(os.path.join(root, pr.JP_REPO)))
-        missing_exempt = [v for v in _m if v in exempt]
         n = next_task_n(triage)
+        escalation_tasks = plan_doc.setdefault("escalation_tasks", [])
         for key in escalate:
             ids = [
                 i
@@ -333,10 +380,13 @@ def apply() -> int:
                         "deferred"
                     ]
                 )
-                if i not in verdicts
+                if i not in verdicts and i not in assigned
             ]
             for k in range(0, len(ids), pr.CHUNK):
                 bs = [by_id[i] for i in ids[k : k + pr.CHUNK]]
+                if n not in escalation_tasks:
+                    escalation_tasks.append(n)
+                    save_plan(triage, plan_doc)
                 pr.write_task(
                     root,
                     triage,

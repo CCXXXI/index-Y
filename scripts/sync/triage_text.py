@@ -21,6 +21,7 @@ diff，天然不进审查；opf 时间戳块机械过滤。可疑块在审查期
 """
 
 import difflib
+import json
 import os
 import re
 import shutil
@@ -36,6 +37,7 @@ from lib_triage import (
     X_PREFIX,
     X_REPO,
     CatFile,
+    TextChunks,
     clear_sync_ref,
     git,
     head_sha_map,
@@ -53,6 +55,7 @@ from lib_triage import (
 # .triage 中脚本自管的状态文件；其余（verdicts、review_chunks 等）是审查草稿
 MANAGED_STATE = {
     "hold.txt",
+    "review_changes.json",
     "review_changes.txt",
     "review_rule_fx.txt",
     "upstream_context.txt",
@@ -63,7 +66,37 @@ MANAGED_STATE = {
 REVIEW_DIRS = ("verdicts", "review_chunks", "review_prompts")
 
 # opf 的 dcterms:modified 时间戳块：机械更新，不进审查
-_TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+_TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?")
+
+
+def read_review_changes(triage: str) -> list[dict]:
+    """读取机器权威 JSON；旧 TXT 显式报迁移错误，不做有损解析。"""
+    path = os.path.join(triage, "review_changes.json")
+    if not os.path.exists(path) and os.path.exists(
+        os.path.join(triage, "review_changes.txt")
+    ):
+        raise RuntimeError(
+            "旧版 review_changes.txt 不能无损迁移解析；请重跑 triage_text 生成 "
+            "review_changes.json"
+        )
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_review_changes(triage: str, blocks: list[dict]) -> None:
+    """以固定结构写机器权威 JSON，并由同一份数据生成人类可读 TXT。"""
+    os.makedirs(triage, exist_ok=True)
+    with open(os.path.join(triage, "review_changes.json"), "w", encoding="utf-8") as f:
+        json.dump(blocks, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    with open(os.path.join(triage, "review_changes.txt"), "w", encoding="utf-8") as f:
+        for b in blocks:
+            f.write(
+                f"[{len(b['files'])}次] {'、'.join(b['files'])}\n"
+                f"- {b['old']}\n+ {b['new']}\n"
+            )
+            f.writelines(f"★ {annotation}\n" for annotation in b["annotations"])
+            f.write("\n")
 
 
 def clean_scratch() -> None:
@@ -98,12 +131,52 @@ def term_summary(o: str, n: str, maxlen: int = 40) -> str:
     return "；".join(outs)
 
 
-def block_changes(old: bytes, new: bytes) -> list[tuple[str, str]]:
+class OpfTextChunks(TextChunks):
+    """OPF 文本块；仅规范化 dcterms:modified 节点内的时间戳。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_modified = 0
+        self.modified_tags: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        is_modified = tag == "dcterms:modified" or (
+            tag == "meta" and dict(attrs).get("property") == "dcterms:modified"
+        )
+        if is_modified:
+            self.in_modified += 1
+            self.modified_tags.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self.modified_tags and tag == self.modified_tags[-1]:
+            self.modified_tags.pop()
+            self.in_modified -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.in_modified and _TS.fullmatch(norm_ws(data)):
+            data = "1970-01-01T00:00:00"
+        super().handle_data(data)
+
+
+def review_text_chunks(content: bytes, rel: str | None) -> list[str]:
+    if rel is None or not rel.lower().endswith(".opf"):
+        return text_chunks(content)
+    parser = OpfTextChunks()
+    parser.feed(content.decode("utf-8"))
+    return parser.raw
+
+
+def block_changes(
+    old: bytes, new: bytes, rel: str | None = None
+) -> list[tuple[str, str]]:
     """Y 文本块 diff（norm_ws 形态）：1:1 替换为逐块 (旧, 新)；增删与
     非等长替换（结构改动）以块组呈现（一侧为空串表示纯增/删）。
-    opf 时间戳块已滤除。"""
-    oc = [norm_ws(c) for c in text_chunks(old)]
-    nc = [norm_ws(c) for c in text_chunks(new)]
+    仅 OPF 的 dcterms:modified 时间戳节点被机械滤除。
+    """
+    oc = [norm_ws(c) for c in review_text_chunks(old, rel)]
+    nc = [norm_ws(c) for c in review_text_chunks(new, rel)]
     out = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
         a=oc, b=nc, autojunk=False
@@ -114,7 +187,7 @@ def block_changes(old: bytes, new: bytes) -> list[tuple[str, str]]:
             out.extend((oc[i], nc[j]) for i, j in zip(range(i1, i2), range(j1, j2)))
         else:
             out.append(("\n".join(oc[i1:i2]), "\n".join(nc[j1:j2])))
-    return [(o, n) for o, n in out if not (_TS.fullmatch(o) and _TS.fullmatch(n))]
+    return out
 
 
 def ordered_rules() -> tuple[dict[str, list[dict]], list[dict]]:
@@ -227,7 +300,7 @@ def collect() -> dict:
             old = cf.read(yhm[old_path])
             with open(os.path.join("EPUB", rel), "rb") as f:
                 new = f.read()
-            ch = block_changes(old, new)
+            ch = block_changes(old, new, rel)
             if ch:
                 blocks[rel] = ch
             else:
@@ -297,7 +370,8 @@ def main() -> None:
     if nontext:
         print(f"{len(nontext):5d}  非文本改动（镜像校验后随原子提交）")
 
-    # 导出审查材料：按块聚合（相同改动跨文件去重为 [N次]）
+    # 导出审查材料：按块聚合（相同改动跨文件去重为 [N次]）。
+    # JSON 是跨脚本唯一机器权威；TXT 仅由同一结构渲染供人阅读。
     os.makedirs(STATE_DIR, exist_ok=True)
     agg = Counter()
     agg_rels = defaultdict(list)
@@ -305,13 +379,18 @@ def main() -> None:
         for o, n in ch:
             agg[(o, n)] += 1
             agg_rels[(o, n)].append(rel)
-    with open(
-        os.path.join(STATE_DIR, "review_changes.txt"), "w", encoding="utf-8"
-    ) as f:
-        f.writelines(
-            f"[{c}次] {'、'.join(agg_rels[(o, n)])}\n- {o}\n+ {n}\n\n"
-            for (o, n), c in agg.most_common()
-        )
+    material = [
+        {
+            "id": i,
+            "files": agg_rels[(o, n)],
+            "old": o,
+            "new": n,
+            "commits": [],
+            "annotations": [],
+        }
+        for i, ((o, n), _c) in enumerate(agg.most_common())
+    ]
+    write_review_changes(STATE_DIR, material)
     print(
         f"审查材料: {os.path.join(STATE_DIR, 'review_changes.txt')}"
         f"（{sum(agg.values())} 块 / 去重 {len(agg)}）"

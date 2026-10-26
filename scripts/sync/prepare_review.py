@@ -1,8 +1,9 @@
 """大规模 AI 审查准备：解析审查材料 → 原文纯文本 / 任务块 / 子代理提示词。
 
-适用：triage_text 导出 .triage/review_changes.txt 后，块数多、需派子代理
-对照日文原文审查时（.agents/skills/sync-triage/SKILL.md §6）。产物幂等可重跑；verdicts/
-内已有 .jsonl 时拒绝重建（审查在途，先聚合或人工清理，防任务块被换底）。
+适用：triage_text 导出 .triage/review_changes.json（机器权威；TXT 仅供人读）后，
+块数多、需派子代理对照日文原文审查时（.agents/skills/sync-triage/SKILL.md §6）。
+产物幂等可重跑；verdicts/ 内已有 .jsonl 时拒绝重建（审查在途，先聚合或人工清理，
+防任务块被换底）。
 
 产物（.triage/ 下）：
 - review_blocks.json：去重块列表（含 id，verdict 以 id 关联）
@@ -42,7 +43,9 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import jp_align
+import verdict_io
 from lib_triage import repo_root, triage_parser
+from triage_text import read_review_changes
 
 CHUNK = 50  # 每任务块数
 SMALL = 20  # 小于此块数的文件参与合并
@@ -51,7 +54,7 @@ JP_REPO = "../index-jp"  # 相对仓库根的位置（AGENTS.md 约定同级目�
 
 # 行号直读提示词（任务全部块落在 bw_aligned pass 卷且逐块定位成功时）。
 # 原文已按行号对齐，无需关键词检索；行号失配是诚实失败形态，判 unlocated。
-PROMPT_ALIGNED = r"""背景：你在 index-Y 仓库（C:\Users\ccxxx\Documents\GitHub\index-Y）做上游同步分流的审查。任务 JSON 的 blocks 为 [{id, files, old, new, jp_loc}]，old=旧译文，new=上游新译文（《魔禁》系列粉丝翻译修订）。绝大多数改动是正常改进，你的任务是逐块鉴定。
+PROMPT_ALIGNED = r"""背景：你在 index-Y 仓库根目录做上游同步分流的审查。任务 JSON 的 blocks 为 [{id, files, old, new, jp_loc}]，old=旧译文，new=上游新译文（《魔禁》系列粉丝翻译修订）。绝大多数改动是正常改进，你的任务是逐块鉴定。
 
 日文原文已与译文逐行对齐（复用上游对齐管线，门禁 0 问题）：每块的 jp_loc 列出 files 各次出现的 {file（译文文件）, line（该文件中译文行号）, jp（对应的日文行剥标签文本）, context（前后行，L行号: 文本）}。直接以 jp 行对照判定，无需检索原文。另附全卷对齐原文供扩大上下文（〔单元 L行号〕前缀，已剥 <rt> 注音和标签）：
 @JP_TXT@
@@ -87,7 +90,7 @@ CLUSTER_NOTE = """
 
 # 子代理提示词模板。@JP_TXT@/@JP_TXT_FIRST@/@N@ 为占位符。
 # 判定词汇与检索纪律的权威版本就在此模板内。
-PROMPT = r"""背景：你在 index-Y 仓库（C:\Users\ccxxx\Documents\GitHub\index-Y）做上游同步分流的审查。任务 JSON 的 blocks 为 [{id, files, old, new}]，old=旧译文，new=上游新译文（《魔禁》系列粉丝翻译修订）。绝大多数改动是正常改进，你的任务是逐块鉴定。
+PROMPT = r"""背景：你在 index-Y 仓库根目录做上游同步分流的审查。任务 JSON 的 blocks 为 [{id, files, old, new}]，old=旧译文，new=上游新译文（《魔禁》系列粉丝翻译修订）。绝大多数改动是正常改进，你的任务是逐块鉴定。
 
 日文原文纯文本（每行一页，前缀〔p-NNN〕，已剥 <rt> 注音和标签、归并空白）：
 @JP_TXT@
@@ -104,7 +107,7 @@ PROMPT = r"""背景：你在 index-Y 仓库（C:\Users\ccxxx\Documents\GitHub\in
 3. 术语统一类（同一 A→B 在多块重复）：仍逐块判，但同一术语对的 jp 证据可引用同一句。
 
 检索原文方法（严格遵守，否则必败）：
-- 【本机坑】git-bash 对非 ASCII 命令行参数按 GBK 编码，bash 里 grep 中文/日文、python -c 内联中日文都会被毁。一律用 write_file 写 .py 脚本（锚点写在脚本里），再以 uv run python <脚本绝对路径> 跑（terminal 的 workdir 设为 C:\Users\ccxxx\Documents\GitHub\index-Y）。
+- 【本机坑】git-bash 对非 ASCII 命令行参数按 GBK 编码，bash 里 grep 中文/日文、python -c 内联中日文都会被毁。一律用 write_file 写 .py 脚本（锚点写在脚本里），再以 uv run python <脚本绝对路径> 跑（terminal 的 workdir 设为 index-Y 仓库根目录，由运行环境提供实际路径）。
 - 脚本模板：
 import re
 txt = open(r"@JP_TXT_FIRST@", encoding="utf-8").read()
@@ -119,38 +122,8 @@ FINAL SUMMARY 要求：ok/suspect/unsure/unlocated 各多少；suspect/unsure/un
 
 
 def parse_blocks(triage: str) -> list[dict[str, Any]]:
-    """review_changes.txt → [{id, files, old, new}]（-/+ 侧含无前缀续行）。"""
-    blocks: list[dict[str, Any]] = []
-    cur: dict[str, Any] | None = None
-    side: str | None = None
-    with open(os.path.join(triage, "review_changes.txt"), encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if line.startswith("★"):  # upstream_context 的预注行，非块内容
-                continue
-            m = re.match(r"^\[(\d+)次\] (.+)$", line)
-            if m:
-                if cur:
-                    blocks.append(cur)
-                cur = {
-                    "files": [x.strip() for x in m.group(2).split("、")],
-                    "old": "",
-                    "new": "",
-                }
-                side = None
-            elif cur is not None and line.startswith("- "):
-                cur["old"] += line[2:]
-                side = "old"
-            elif cur is not None and line.startswith("+ "):
-                cur["new"] += line[2:]
-                side = "new"
-            elif cur is not None and side and line:
-                cur[side] += "\n" + line
-    if cur:
-        blocks.append(cur)
-    for i, b in enumerate(blocks):
-        b["id"] = i
-    return blocks
+    """review_changes.json → 机器权威块列表；TXT 仅供人工阅读。"""
+    return read_review_changes(triage)
 
 
 class TextOnly(HTMLParser):
@@ -264,6 +237,9 @@ def build_aligned_text(root: str, vols: list[str], aligned: dict) -> dict[str, s
     paths = {}
     for vol in vols:
         if vol not in aligned:
+            stale = os.path.join(out_dir, f"{vol}.aligned.txt")
+            if os.path.exists(stale):
+                os.remove(stale)
             continue
         lines = []
         for f in sorted(os.listdir(aligned[vol])):
@@ -291,6 +267,14 @@ def exempt_vols(jp_root: str) -> set[str]:
         return {ln.split("#")[0].strip() for ln in f if ln.split("#")[0].strip()}
 
 
+def remove_jp_artifacts(out_dir: str, vol: str) -> None:
+    """缺原文时禁止任何本轮前的分页/对齐产物继续充当证据。"""
+    for suffix in (".txt", ".aligned.txt"):
+        path = os.path.join(out_dir, f"{vol}{suffix}")
+        if os.path.exists(path):
+            os.remove(path)
+
+
 def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]]:
     """为涉及的卷生成 jp_text/<卷>.txt。返回 (卷→txt 路径, 缺原文的卷)。"""
     jp_root = os.path.normpath(os.path.join(root, JP_REPO))
@@ -305,6 +289,7 @@ def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]
     for vol in vols:
         if vol not in available:
             missing.append(vol)
+            remove_jp_artifacts(out_dir, vol)
             continue
         vdir = os.path.join(jp_root, available[vol])
         xdir = next(
@@ -317,6 +302,7 @@ def build_jp_text(root: str, vols: list[str]) -> tuple[dict[str, str], list[str]
         )
         if xdir is None:
             missing.append(vol)
+            remove_jp_artifacts(out_dir, vol)
             continue
         lines = [
             f"〔{os.path.splitext(pg)[0]}〕{page_text(os.path.join(xdir, pg))}"
@@ -446,7 +432,7 @@ def write_task(
     chunk_dir = os.path.join(triage, "review_chunks")
     prompt_dir = os.path.join(triage, "review_prompts")
     verdict_dir = os.path.join(triage, "verdicts")
-    vols_n = sorted({vol_code(b["files"][0]) for b in bs})
+    vols_n = sorted({vol_code(f) for b in bs for f in b["files"]})
     files = sorted({f for b in bs for f in b["files"]})
     shapes_in: dict[tuple, list[int]] = defaultdict(list)
     for b in bs:
@@ -516,6 +502,14 @@ def write_task(
     return n_loc
 
 
+def clear_task_outputs(triage: str) -> None:
+    for name in ("review_chunks", "review_prompts", "verdicts"):
+        directory = os.path.join(triage, name)
+        os.makedirs(directory, exist_ok=True)
+        for old in os.listdir(directory):
+            os.remove(os.path.join(directory, old))
+
+
 def main() -> int:
     parser = triage_parser(__doc__)
     parser.add_argument(
@@ -526,13 +520,40 @@ def main() -> int:
     args = parser.parse_args()
     root = repo_root()
     triage = os.path.join(root, ".triage")
-    if not os.path.exists(os.path.join(triage, "review_changes.txt")):
-        print("无 .triage/review_changes.txt（先跑 triage_text）")
+    try:
+        blocks = parse_blocks(triage)
+    except FileNotFoundError:
+        print("无 .triage/review_changes.json（先跑 triage_text）")
         return 1
+    except RuntimeError as e:
+        print(f"错误：{e}")
+        return 1
+    if not blocks:
+        with open(
+            os.path.join(triage, "review_blocks.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump([], f)
+        clear_task_outputs(triage)
+        for name in ("sample_plan.json", "sample_plan.json.tmp"):
+            stale = os.path.join(triage, name)
+            if os.path.exists(stale):
+                os.remove(stale)
+        print("审查材料 0 块，已写出空块集合并清理旧任务")
+        return 0
 
     verdict_dir = os.path.join(triage, "verdicts")
     done_ids: set[int] = set()
-    if os.path.isdir(verdict_dir):
+    if args.pending:
+        try:
+            with open(
+                os.path.join(triage, "review_blocks.json"), encoding="utf-8"
+            ) as f:
+                old_blocks = json.load(f)
+            done_ids = set(verdict_io.load_verdicts(triage, old_blocks))
+        except verdict_io.VerdictError as exc:
+            print(f"verdict 校验失败：\n{exc}")
+            return 1
+    elif os.path.isdir(verdict_dir):
         for fn in os.listdir(verdict_dir):
             if not fn.endswith(".jsonl"):
                 continue
@@ -548,12 +569,6 @@ def main() -> int:
         )
         return 1
 
-    blocks = parse_blocks(triage)
-    if not blocks:
-        print("审查材料 0 块，无需准备")
-        return 0
-    with open(os.path.join(triage, "review_blocks.json"), "w", encoding="utf-8") as f:
-        json.dump(blocks, f, ensure_ascii=False, indent=1)
     print(f"块总数 {len(blocks)}")
 
     # 兼容规范化块（NFKC 等价，如 ＆→&）自动判 ok，不占用子代理任务块
@@ -570,7 +585,7 @@ def main() -> int:
         review = [b for b in review if b["id"] not in done_ids]
         print(f"--pending：已完成 {len(done_ids)} 块，待审 {len(review)} 块")
 
-    vols = sorted({vol_code(b["files"][0]) for b in blocks})
+    vols = sorted({vol_code(f) for b in blocks for f in b["files"]})
     jp_paths, missing = build_jp_text(root, vols)
     for vol, p in sorted(jp_paths.items()):
         print(f"原文 {vol} -> {os.path.relpath(p, root)}")
@@ -583,6 +598,13 @@ def main() -> int:
     exempt = exempt_vols(os.path.normpath(os.path.join(root, JP_REPO)))
     missing_real = [v for v in missing if v not in exempt]
     missing_exempt = [v for v in missing if v in exempt]
+    for b in blocks:
+        block_vols = {vol_code(f) for f in b["files"]}
+        b["jp_exempt"] = bool(block_vols) and all(
+            v in missing_exempt for v in block_vols
+        )
+    with open(os.path.join(triage, "review_blocks.json"), "w", encoding="utf-8") as f:
+        json.dump(blocks, f, ensure_ascii=False, indent=1)
     if missing_exempt:
         print(
             f"缺原文卷（已确认无法补充，豁免对照）："
@@ -596,7 +618,9 @@ def main() -> int:
         )
 
     groups = chunk(review)
-    aligned = aligned_vols(root)
+    aligned = {
+        vol: path for vol, path in aligned_vols(root).items() if vol not in missing
+    }
     aligned_paths = build_aligned_text(root, vols, aligned)
     for vol, p in sorted(aligned_paths.items()):
         print(f"对齐原文 {vol} -> {os.path.relpath(p, root)}")
@@ -613,10 +637,7 @@ def main() -> int:
         ]
         start_n = max(prev) + 1 if prev else 0
     else:
-        for d in (chunk_dir, prompt_dir, verdict_dir):
-            os.makedirs(d, exist_ok=True)
-            for old in os.listdir(d):
-                os.remove(os.path.join(d, old))
+        clear_task_outputs(triage)
     if auto and not args.pending:
         with open(os.path.join(verdict_dir, "auto.jsonl"), "w", encoding="utf-8") as f:
             f.writelines(

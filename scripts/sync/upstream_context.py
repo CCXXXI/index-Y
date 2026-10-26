@@ -11,7 +11,8 @@
 产物（.triage/ 下）：
 - upstream_context.txt：pin 区间、逐卷新 commit 列表（含 body）、区间内
   新增/修改的 maintenance-records 全文、全部记录索引、政策文件变更。
-- review_changes.txt 块尾预注（★ 前缀行，prepare_review 的 parse_blocks 跳过）：
+- review_changes.json：块级机器权威预注（commits 为 8 位 sha；annotations
+  为人类可读预注）；review_changes.txt 由该 JSON 重生成，仅供人读：
   ① commit 归属——块文本在区间内逐 commit 的 diff 纯文本中整段逐字命中，
   标出引入 commit（短 sha + subject，时间序；2+ 个 = 振荡链/多区域块/拆分
   波次）；② records 命中——块的最小差异片段在全部 records 中检索的命中。
@@ -21,7 +22,6 @@
 
 import difflib
 import os
-import re
 import sys
 from functools import cache
 from typing import NamedTuple
@@ -40,6 +40,7 @@ from lib_triage import (
     x_changes,
     x_head,
 )
+from triage_text import read_review_changes, write_review_changes
 
 RECORDS_DIR = "docs/maintenance-records"
 MAX_HIT_RECS = 4  # 每块最多列出的命中记录数
@@ -49,7 +50,6 @@ ATTR_LONG = 10  # 较长侧 ≥ATTR_LONG 为长块：单侧整段命中即归属
 ATTR_MIN_SIDE = 2  # 任一侧 <ATTR_MIN_SIDE（1 字）无区分度，未定位
 ATTR_MIN_SINGLE = 6  # 纯增删块（一侧为空）：非空侧 ≥ATTR_MIN_SINGLE 才归属
 MAX_HIT_COMMITS = 4  # 每块最多列出的归属 commit 数
-BLOCK_HEAD = re.compile(r"^(\[\d+次]|\[[XY]\]) ")
 
 
 def vol_commits(base: str, head: str, vol: str) -> list[str]:
@@ -269,63 +269,42 @@ def search_records(idx: RecordsIndex, frags: set[str]) -> list[str]:
 def annotate(
     path: str, corpus: dict[str, str], commits: list[CommitDiff]
 ) -> tuple[int, int]:
-    """在 review/suspect 材料每块尾部插入 ★ 预注行；返回 (commit 归属块数, records 命中块数)。
+    """把 commit 归属与 records 预注写回 JSON，并由 JSON 重生成 TXT。
 
-    行级遍历保持原格式：块 = [N次]/[X|Y] 头行 + -/+ 行与续行，空行收尾。
-    triage_text 每次导出都覆写原材料，故预注天然幂等（材料更新后重跑本脚本）。
-    块尾先列 commit 归属（块的引入 commit；2+ 个 = 振荡链/多区域块/拆分波次），
-    再列 records 命中。
+    commits 保留全部 8 位归属 sha；annotations 保存 TXT 去掉 ``★ `` 的
+    全部预注行（含人类可读的 commit subject、未定位与记录命中）。
     """
-    if not os.path.exists(path):
-        return 0, 0
-    with open(path, encoding="utf-8") as f:
-        lines = f.read().splitlines()
+    triage = os.path.dirname(path)
+    if not os.path.exists(os.path.join(triage, "review_changes.json")):
+        if not os.path.exists(path):
+            return 0, 0
+        read_review_changes(triage)  # 旧 TXT：显式报迁移错误
+    blocks = read_review_changes(triage)
     idx = RecordsIndex(corpus)
-    out: list[str] = []
     n_commit, n_records = 0, 0
-    old: list[str] = []
-    new: list[str] = []
-    side: list[str] | None = None
-
-    def flush() -> None:
-        nonlocal n_commit, n_records
-        o_text, n_text = "\n".join(old), "\n".join(new)
+    for b in blocks:
+        o_text, n_text = b["old"], b["new"]
+        b["commits"] = []
+        b["annotations"] = []
         if not o_text and not n_text:
-            return  # 文件末尾的空 flush（或零区域块）：无可归属，不产预注行
+            continue
         if commits:
             at = attribute(o_text, n_text, commits)
             if at:
                 n_commit += 1
+                b["commits"] = [c.short for c in at]
                 for c in at[:MAX_HIT_COMMITS]:
-                    out.append(f"★ commit {c.short}: {c.subject}")
+                    b["annotations"].append(f"commit {c.short}: {c.subject}")
                 if len(at) > MAX_HIT_COMMITS:
-                    out.append(f"★ commit …共 {len(at)} 个，详见 upstream_context.txt")
+                    b["annotations"].append(
+                        f"commit …共 {len(at)} 个，详见 upstream_context.txt"
+                    )
             else:
-                out.append("★ commit: 未定位")
+                b["annotations"].append("commit: 未定位")
         hits = search_records(idx, windows_of(o_text, n_text))
-        out.extend(hits)
+        b["annotations"].extend(h.removeprefix("★ ") for h in hits)
         n_records += bool(hits)
-        old.clear()
-        new.clear()
-
-    for line in lines:
-        if BLOCK_HEAD.match(line):
-            side = None
-        elif line.startswith("- "):
-            old.append(line[2:])
-            side = old
-        elif line.startswith("+ "):
-            new.append(line[2:])
-            side = new
-        elif line and side is not None:
-            side.append(line)
-        elif not line:
-            flush()
-            side = None
-        out.append(line)
-    flush()
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+    write_review_changes(triage, blocks)
     return n_commit, n_records
 
 
@@ -347,6 +326,16 @@ def main() -> int:
             os.remove(ctx_path)  # 防陈旧文件被误当本轮材料
         print("pin 未推进（未起新轮），跳过上游上下文导出")
         return 0
+    try:
+        merge_base = gitx("merge-base", base, head).decode().strip()
+    except RuntimeError:
+        merge_base = ""
+    if merge_base != base:
+        print(
+            "错误：仅支持 pin 为新 HEAD 祖先的正向区间；"
+            f"拒绝反向/分叉区间 {base[:8]}..{head[:8]}"
+        )
+        return 2
 
     vols = changed_vols()
     commits = {
