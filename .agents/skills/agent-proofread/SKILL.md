@@ -16,7 +16,7 @@ proofreading 的前移：发现环节从「维护者阅读时记下」换成「�
 
 ### 1. 切块分派子 agent（全文对照）
 
-- `uv run python scripts/agent_proofread/plan_chunks.py <卷>`：把整卷正文切成 ≤10 块（delegate_task 并行上限），主区间无缝拼接、前后 ~10 行重叠上下文。包装页（Cover/Illustrations/Information 等）自动跳过。
+- `uv run python scripts/agent_proofread/plan_chunks.py <卷>`：默认把整卷正文切成不超过 10 块（软上限，可用 `--max-chunks` 调整），主区间无缝拼接、前后 ~10 行重叠上下文。包装页（Cover/Illustrations/Information 等）自动跳过。
 - **中日逐行对照文件**（bw_aligned pass 卷）：plan_chunks 为每块生成 `.triage/proofread_chunks/<卷码>/chunk-NN.txt`——每物理行一对 CN（Y 剥标签，ruby 注音连写）/JP（对齐单元同行剥标签），行号即 Y 物理行号（`check_y_jp_alignment` 门禁保证行结构一致）。派生产物，每轮开工重新生成；对齐缺失/行数不等的单元（PAIR_RULES 豁免等）段内只列 CN 并标注「※无行号对齐」；非 pass 卷自动退回旧形态（goal 直指 xhtml 行区间 + locator 核对，模板【无行号对齐卷模式】节）。块尺寸默认 1.2 万中文字符/块（对照形态输入近翻倍；未对齐卷仍 1.5 万）；大卷（>12 万字符）给 `--max-chunks 14` 维持块尺寸——并行上限是配置项（当前 30），14 块单波可行（S5_01_01 实证）。
 - 分派参数以 plan_chunks 输出为准直接复制：goal 用逐块 goal 行，context 与 output_schema 用末尾印出的全块共用版（context 是短指令，让子 agent 自 skill_view 加载 `templates/chapter-agent-prompt.md` 并替换 `{{VOL_PREFIX}}`）。**禁止把 4.5KB 模板全文 ×N 块手工抄进调用**——长重复 JSON 抄写会塌缩漏字段（S1_04 事故：context 连续 4 次漏写，steer 才救回）。一次调用并行分派全部块。
 - 子 agent 的日文依据随对照文件下发（JP 行照抄进 jp_evidence，误译/漏译类必附）；`scripts/proofreading_locate.py` 只剩两用途：「不一致」类的全卷计数、无对齐段/失配区/非对齐卷兜底——模板要求**批量一次跑完**（试跑教训：一词一查会让单 agent 拖到 40+ 轮）。

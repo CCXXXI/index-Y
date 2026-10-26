@@ -23,7 +23,8 @@ uv run python scripts/sync/run_all.py
 
 # ===== 人工审查 =====
 # 审查 .triage/review_changes.txt（Y 侧文本块 diff 聚合，★ 行为上游 commit
-# 归属与记录命中预注）；有新卷/新章节时另审 .triage/review_rule_fx.txt
+# 归属与记录命中预注；机器消费权威为同目录 review_changes.json）；
+# 有新卷/新章节时另审 .triage/review_rule_fx.txt
 #（新增文件的规则生效清单，见「2. 审查材料与审查」），
 # 为可疑改动写 x2y 规则（校正或回钉，见「上游错误的规则化」），
 # 重跑 uv run python scripts/sync/x2y.py；
@@ -45,17 +46,17 @@ uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X
 uv run python scripts/sync/check_y_jp_alignment.py   # 门禁：Y 与 JP 行结构一致（bw_aligned pass 卷）
 uv run python scripts/sync/triage_text.py            # 导出审查材料；--commit 覆盖核验 + 原子提交
 uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + records 命中预注（--fetch 起新轮）
-# --finish 等价于：check_y_freshness →（规则在场时延迟落地流程）→ triage_text --commit → check_y_jp_alignment
+# --finish：check_y_freshness →（规则在场时延迟落地流程）→ check_y_jp_alignment → triage_text --commit
 ```
 
 脚本间共享状态在仓库根目录 `.triage/`（已 gitignore），其中脚本自管的状态文件只有
-`hold.txt`、`review_changes.txt`、`review_rule_fx.txt`、`upstream_context.txt`、`sync_ref`，其余均为审查草稿。
+`hold.txt`、`review_changes.json`、`review_changes.txt`、`review_rule_fx.txt`、`upstream_context.txt`、`sync_ref`，其余均为审查草稿。
 
 **数据模型**：`index-X/` 是上游仓库的 submodule（pin = superproject HEAD 的 gitlink，
 即上轮同步点），X 语料即其 `EPUB/` 树。X 侧「旧」= pin，「新」= submodule HEAD，轮内恒定。
 
 **审查材料按构造只有上游驱动改动**：规则改动随 `--finish` 延迟落地（见「4. 收尾」），
-原子同步提交前先 stash 规则重渲染，落仓的 Y 即纯上游形态（HEAD 自洽），轮末
+原子同步提交前先备份并还原 rules/ 后重渲染，落仓的 Y 即纯上游形态（HEAD 自洽），轮末
 freshness 门挡陈旧/直接编辑的 Y——因此 `review_changes.txt` = Y 侧 HEAD→工作区的
 文本块 diff 就是全部待审内容，不做分类、无需 X/Y 配对。审查即门控。
 （例外：审查中改规则重跑 x2y 后到 `--finish` 前，材料会混入自己的规则效果，
@@ -117,7 +118,7 @@ x2y.py，Y 滞后一个上游版本）。
 
 审查进行中改规则**无需中途提交**：改 `rules/` 后重跑 `uv run python scripts/sync/x2y.py`，
 验证 Y 侧 diff 的每个 hunk 都是规则效果，重跑 triage_text 重导材料（幂等，已净化的
-块消失）。规则改动留在工作区，`--finish` 统一处理：自动 stash 规则落纯上游形态的
+块消失）。规则改动留在工作区，`--finish` 统一处理：自动备份并还原 rules/ 后落纯上游形态的
 原子同步提交，再恢复规则重渲染（Y 侧相对 HEAD 只剩规则效果），报告待提交清单。
 注意此后到规则提交落地前，审查材料会混入自己的规则效果（HEAD 自洽暂缓到收尾恢复）；
 跨轮防护不变——规则提交未落地前 `--sync` 被 update_x 拒绝。
@@ -133,9 +134,10 @@ x2y.py，Y 滞后一个上游版本）。
 
 ## 2. 审查材料与审查
 
-`review_changes.txt`：Y 侧文本块 diff 按块聚合（相同改动跨文件去重为 `[N次]`），
+`review_changes.json`：跨脚本机器权威，块内保存 files/old/new/commits/annotations，任意多行与控制前缀均可逆。
+`review_changes.txt` 由 JSON 派生供人阅读：Y 侧文本块 diff 按块聚合（相同改动跨文件去重为 `[N次]`），
 每块 `- 旧` / `+ 新` 两行（结构改动为块组多行），块尾 `★` 行是预注（上游 commit
-归属 + 上游记录命中，详见「上游记录的使用纪律」）。
+归属 + 上游记录命中，详见「上游记录的使用纪律」）。旧版仅有 TXT 的材料须重跑 triage_text 生成 JSON。
 写规则需要 X 侧原文时直接在 `index-X/EPUB/<卷>/` 检索片段。
 
 `review_rule_fx.txt`：新增文本文件（新卷/新章节）的规则生效清单——新增内容未经
@@ -158,7 +160,8 @@ x2y.py，Y 滞后一个上游版本）。
   --finish 均跑）：bw_aligned pass 卷逐单元要求 Y 文件行数 == JP 对齐单元行数。
   回钉恢复被删内容、插入补译、删除上游误加时，值按 JP 行结构行内书写——JP 多句
   合一段就并段，不照搬旧译的拆段（旧译拆段未必忠实 JP）。合法的结构差异豁免在上游
-  登记（PAIR_RULES、TEXTUAL_IMAGE_HEADERS），脚本自动跳过。门禁报失配时先复核 JP
+  登记（PAIR_RULES、TEXTUAL_IMAGE_HEADERS），逐卷核实的合法缺席单元在
+  `check_y_jp_alignment.py` 的 `UNPAIRED_NUMERIC_UNITS` 显式登记，脚本自动跳过。门禁报失配时先复核 JP
   原始页：确系规则前提错误（如误判「原文无节号」删了上游正确行）则删除该规则
   （证伪证据写入 commit message），不改 Y 迁就规则。
 
@@ -235,11 +238,12 @@ uv run python scripts/sync/aggregate_verdicts.py  # 校验完整性 + jp 引用�
 
 `--finish` 先跑 check_y_freshness（不变式前提），再按 rules/ 是否有在途改动分路：
 
-- **无在途规则**：triage_text `--commit` 覆盖核验（Y 侧每条在途改动都必须入覆盖集：
+- **无在途规则**：先跑 check_y_jp_alignment，再由 triage_text `--commit` 覆盖核验（Y 侧每条在途改动都必须入覆盖集：
   文本块/新增/删除/纯格式化/非文本镜像/挂起；非 Y 侧 stray 同样列出——**核验先于
   提交，中止时本轮不产生任何提交**，人工按性质提交后重跑 `--finish`）后一笔原子
   同步提交 `{gitlink 推进, 全部 Y 侧改动}`，工作区清零后分流结束。
-- **有在途规则**：自动 stash 规则 → 重渲染（Y 回纯上游形态）→ triage_text `--commit`
-  落原子同步提交 → 恢复规则 → 重渲染（Y 侧只剩规则效果）→ 报告待提交清单并以
-  非零码退出（轮次保持开放）。把 rules/ 改动与 Y 侧规则效果文件作为单个规则提交
+- **有在途规则**：自动备份 rules/ → 还原 HEAD 规则并重渲染 → JP 门禁 → triage_text `--commit`
+  落原子同步提交 → 恢复规则 → 重渲染（Y 侧只剩规则效果）→ 再次 JP 门禁 → 报告待提交清单并以
+  非零码退出（轮次保持开放）。遗留 rules_backup(.tmp) 时 --finish/--sync 均阻断，先人工恢复备份。
+  把 rules/ 改动与 Y 侧规则效果文件作为单个规则提交
   入仓（diff 即规则生效形态），工作区清零后本轮才结束——无需再跑 `--finish`。

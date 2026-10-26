@@ -19,8 +19,8 @@
 【不报什么】语序重排/断句与日语不同（日译中正常手法）；口语化表达；角色口癖与刻意书写特征（大舌头、符号化、故意谐音）；既有译名（人名/能力名/组织名，如 一方通行/Accelerator、御坂美琴、科学阵营/魔法阵营、超能力者排名第X位）一律视为已定，不报「应译作 X」；「读着不顺但说不出具体问题」的纯语感项。疑似「衍字/缺字」但属全卷统一体例的（如各章标题的固定写法），先跨章核对体例再报。
 
 【一致性计数与兜底】正常对照区间不需要工具：日文原文已在手。仅两种情形用定位器（方法见下）：①「不一致」类需要全卷计数确认另一种写法的存在与分布；②对照文件内「※无行号对齐」标注段、或你发现连续多行 CN/JP 明显不相关（行号失配）时的日文核对。确需使用时：先把整个区间通读完并记下全部候选疑点，把需要核对的关键词一次性写进同一个清单文件，定位器一次跑完；确有遗漏用定位器写第二轮清单补查（不要裸 grep 原文仓库）；第三轮起每多一轮在 stats.note 里记录原因（供主代理成本复核）。禁止一词一跑。清单宁滥勿缺。方法：
-1. 在 C:/Users/ccxxx/AppData/Local/hermes/cache/scratch/ 下建一个关键词清单 txt（UTF-8 一行一条；中文词<TAB>日文原文词，日文词尽量用原文汉字写法，如「魔法<TAB>魔術」）；
-2. cd C:/Users/ccxxx/Documents/GitHub/index-Y && uv run python scripts/proofreading_locate.py "{{VOL_PREFIX}}" <清单路径> --side y；
+1. 在运行环境指定的 Hermes scratch 目录下建一个关键词清单 txt（UTF-8 一行一条；中文词<TAB>日文原文词，日文词尽量用原文汉字写法，如「魔法<TAB>魔術」）；
+2. 在 index-Y 仓库根目录执行 `uv run python scripts/proofreading_locate.py "{{VOL_PREFIX}}" <清单路径> --side y`；
 3. 输出含目标卷 Y 侧逐字上下文（覆盖全卷，可核对区间外一致性）、Y 全语料计数与日文原文命中（已剥注音）。
 
 【产出】final answer 严格输出 JSON（不要多余文字）：{"findings":[{"file":"...","line":123,"category":"错字|语病|误译存疑|漏译存疑|不一致|港台用词|标点字形","quote":"现状逐字短引文","issue":"问题说明","jp_evidence":"日文依据（误译/漏译类必附，否则null）","confidence":"高|中|低","suggestion":"建议处置（可null）"}],"stats":{"chars_read":N,"jp_lookups":N,"note":"一句话总结"}}。file 填译文源文件名（对照文件内各段 == 横幅给出），line 填 L 行号，必须在你的校对主区间内。quote 照抄 CN 行文本（剥标签形态即可，复核层有容差）。jp_evidence 照抄对应 JP 行文本（去掉 `L<n> JP: ` 前缀）——只写日文句子本身，不写来源标注，中文解说写进 issue；禁止凭记忆编造日文原文；纯中文层问题（错字、语病、标点）jp_evidence 为 null。同一可疑模式多处出现归并为一条，在 quote/issue 里列全位置。无发现则 findings 为空数组。stats.jp_lookups 填定位器使用轮次（未用为 0）。不修改任何文件。
