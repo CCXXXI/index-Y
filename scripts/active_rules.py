@@ -196,6 +196,8 @@ def main() -> int:
             f"{Fore.RED}{r['old']}{Style.RESET_ALL} -> "
             f"{Fore.GREEN}{new}{Style.RESET_ALL}"
         )
+        if r["note"]:
+            print(f"  注释：{r['note']}")
         print(
             f"  首次生效 {Fore.CYAN}{p['rel']}:{p['line']}{Style.RESET_ALL}"
             f"{Fore.YELLOW}{p['note']}{Style.RESET_ALL}"
