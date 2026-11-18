@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "index-X" / "tools"))
 import jp_align
 
 # 运行时经 sys.path 挂 index-X/tools 复用上游公开库；CI 不拉 submodule，静态不可解析
-from alignment_rules import (  # ty: ignore[unresolved-import]
+from alignment_rules import (  # ty: ignore[import-not-found]
     PAIR_RULES,
     TEXTUAL_IMAGE_HEADERS,
 )
