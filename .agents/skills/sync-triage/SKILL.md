@@ -45,7 +45,7 @@ uv run python scripts/sync/run_all.py --finish
 uv run python scripts/sync/check_y_freshness.py      # 前置校验：Y == x2y(X)
 uv run python scripts/sync/check_y_jp_alignment.py   # 门禁：Y 与 JP 行结构一致（bw_aligned pass 卷）
 uv run python scripts/sync/triage_text.py            # 导出审查材料；--commit 覆盖核验 + 原子提交
-uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + records 命中预注（--fetch 起新轮）
+uv run python scripts/sync/upstream_context.py       # 上游上下文导出 + commit 归属预注（--fetch 起新轮）
 # --finish：check_y_freshness →（规则在场时延迟落地流程）→ check_y_jp_alignment → triage_text --commit
 ```
 
@@ -186,27 +186,21 @@ x2y.py，Y 滞后一个上游版本）。
 
 难以判断的一律保留审查；处分（写规则）以可坐实的积极证据为前提，宁漏报勿误报。
 
-### 上游记录（index-X submodule）的使用纪律
+### 上游提交记录（index-X submodule）的使用纪律
 
 `index-X/` submodule 是审查参考源（仅经 git plumbing 读，不依赖其工作区状态）。`upstream_context.py`（run_all 自动调用，起新轮带 `--fetch`）做两层机械工作：
 
-- **pin 区间列举**：基准 = superproject HEAD 的 gitlink（上轮同步点），新侧 = submodule HEAD（本轮 checkout 的 ref），区间精确到 commit。导出区间内逐卷新 commit 列表（含 body）与 maintenance-records 全文至 `.triage/upstream_context.txt`；origin/master 领先本轮同步点时附注（属下轮内容）。
-- **块级预注**：两类 `★` 前缀行插入审查材料块尾（prepare_review 解析时跳过）：
-  - `★ commit <sha>: <subject>`：块的引入 commit（块文本在区间 commit 的 diff
-    纯文本中整段逐字命中，时间序；短块要求双侧命中同一 commit，整句逐字巧合
-    概率可忽略故无需统计门槛）。2+ 个 = 振荡链（旧文命中首改、新文命中末改）/
-    多区域段落块/聚合块拆分波次。`未定位` = 无逐字命中（1 字块、ruby 隔断、
-    规则交叠等）——宁可空缺不错指。body 在 `upstream_context.txt` 区间列表查。
-  - `★ <record>: <行>`：改动点子串在全部 records 中检索的命中行。
+- **pin 区间列举**：基准 = superproject HEAD 的 gitlink（上轮同步点），新侧 = submodule HEAD（本轮 checkout 的 ref），区间精确到 commit。导出区间内逐卷新 commit 列表（含 body）至 `.triage/upstream_context.txt`；origin/master 领先本轮同步点时附注（属下轮内容）。
+- **块级预注**：`★ commit <sha>: <subject>` 插入审查材料块尾（prepare_review 解析时跳过），标出块的引入 commit（块文本在区间 commit 的 diff 纯文本中整段逐字命中，时间序；短块要求双侧命中同一 commit，整句逐字巧合概率可忽略故无需统计门槛）。2+ 个 = 振荡链（旧文命中首改、新文命中末改）/多区域段落块/聚合块拆分波次。`未定位` = 无逐字命中（1 字块、ruby 隔断、规则交叠等）——宁可空缺不错指。body 在 `upstream_context.txt` 区间列表查。
 
-记录（commit message 与 maintenance-records）是上游的**自报证据，不免检**。使用分四层：
+提交记录是上游的**自报证据，不免检**。使用分四层：
 
-1. 记录描述的 `旧→新` 与实际 diff 机械一致（预注命中本身即一层佐证）；
+1. 提交记录描述的 `旧→新` 与实际 diff 机械一致；
 2. 所引日文原文真实存在——程序化 grep 核验；
 3. 引文是否真支持改动方向、统一方向裁定是否合理；
-4. 无记录覆盖的块（如整卷重译波）走原有 JP 核实路径，不变。
+4. 提交记录未说明改动依据的块（如整卷重译波）走原有 JP 核实路径，不变。
 
-记录的检索价值：把语义块的「开放式 JP 检索」降级为「按引文确认」；但读完 `upstream_context.txt` 与 ★ 预注后仍按「正常性判断」逐块判定。
+提交记录的检索价值：把语义块的「开放式 JP 检索」降级为「按引文确认」；但读完 `upstream_context.txt` 与 ★ 预注后仍按「正常性判断」逐块判定。
 
 ### 大规模 AI 审查（子代理流程）
 

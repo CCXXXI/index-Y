@@ -90,26 +90,24 @@ def test_triage_export_writes_fixed_json_and_human_txt(
     assert expected["new"] in txt
 
 
-def test_upstream_annotations_update_json_and_regenerate_txt(tmp_path: Path) -> None:
+def test_upstream_commit_annotations_update_json_and_regenerate_txt(
+    tmp_path: Path,
+) -> None:
     triage = tmp_path / ".triage"
     old = "旧原文句子甲乙丙丁"
     new = "新原文句子戊己庚辛"
     tt.write_review_changes(str(triage), [review_block(old=old, new=new)])
-    corpus = {"docs/maintenance-records/record.md": f"记录：{old} → {new}"}
     commits = [uc.CommitDiff("deadbeef", "修正译文", old, new)]
 
-    assert uc.annotate(str(triage / "review_changes.txt"), corpus, commits) == (1, 1)
+    assert uc.annotate(str(triage / "review_changes.txt"), commits) == 1
 
     annotated = json.loads(
         (triage / "review_changes.json").read_text(encoding="utf-8")
     )[0]
     assert annotated["commits"] == ["deadbeef"]
-    assert annotated["annotations"][0] == "commit deadbeef: 修正译文"
-    assert any(a.startswith("record.md: ") for a in annotated["annotations"])
-    assert all(not a.startswith("★") for a in annotated["annotations"])
+    assert annotated["annotations"] == ["commit deadbeef: 修正译文"]
     txt = (triage / "review_changes.txt").read_text(encoding="utf-8")
     assert "★ commit deadbeef: 修正译文\n" in txt
-    assert "★ record.md: " in txt
 
 
 def test_xhtml_timestamp_text_is_not_filtered() -> None:
@@ -368,8 +366,6 @@ def test_upstream_rejects_non_forward_ranges(
     monkeypatch.setattr(uc, "pin_sha", lambda: base)
     monkeypatch.setattr(uc, "x_head", lambda: head)
     monkeypatch.setattr(uc, "changed_vols", list)
-    monkeypatch.setattr(uc, "records_index", lambda head: [])
-    monkeypatch.setattr(uc, "changed_records", lambda base, head: [])
     monkeypatch.setattr(uc, "policy_changes", lambda base, head: [])
 
     def fake_gitx(*args: str, input_bytes: bytes | None = None) -> bytes:

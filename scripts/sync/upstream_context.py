@@ -1,26 +1,23 @@
-"""上游上下文导出：本轮 pin 区间的 commit 记录 + maintenance-records 命中预注，供审查参考。
+"""上游上下文导出：本轮 pin 区间的 commit 记录与归属预注，供审查参考。
 
 参考源是 index-X submodule（全程经 git plumbing 读，不依赖其工作区状态）。
 区间精确：基准 = superproject HEAD 的 gitlink pin（上轮同步点），
 新侧 = submodule HEAD（本轮 update_x checkout 的 ref）；未起新轮
 （pin == HEAD）时静默跳过并清除陈旧产物。
-记录是上游自报证据，【不免检】：本脚本只做机械层（区间列举、片段命中检索），
+提交记录是上游自报证据，【不免检】：本脚本只做机械层（区间列举、diff 归属），
 「引文是否真支持改动」的语义判断保留给审查者
-（.agents/skills/sync-triage/SKILL.md §6 上游记录的使用纪律）。
+（.agents/skills/sync-triage/SKILL.md「上游提交记录（index-X submodule）的使用纪律」）。
 
 产物（.triage/ 下）：
-- upstream_context.txt：pin 区间、逐卷新 commit 列表（含 body）、区间内
-  新增/修改的 maintenance-records 全文、全部记录索引、政策文件变更。
+- upstream_context.txt：pin 区间、逐卷新 commit 列表（含 body）、政策文件变更。
 - review_changes.json：块级机器权威预注（commits 为 8 位 sha；annotations
   为人类可读预注）；review_changes.txt 由该 JSON 重生成，仅供人读：
-  ① commit 归属——块文本在区间内逐 commit 的 diff 纯文本中整段逐字命中，
-  标出引入 commit（短 sha + subject，时间序；2+ 个 = 振荡链/多区域块/拆分
-  波次）；② records 命中——块的最小差异片段在全部 records 中检索的命中。
+  commit 归属——块文本在区间内逐 commit 的 diff 纯文本中整段逐字命中，
+  标出引入 commit（短 sha + subject，时间序；2+ 个 = 振荡链/多区域块/拆分波次）。
 --fetch：先 git fetch（起新轮时 run_all 带入）；在途重跑不带，离线幂等。
 用法: uv run python scripts/sync/upstream_context.py [--fetch]
 """
 
-import difflib
 import os
 import sys
 from functools import cache
@@ -42,10 +39,6 @@ from lib_triage import (
 )
 from triage_text import read_review_changes, write_review_changes
 
-RECORDS_DIR = "docs/maintenance-records"
-MAX_HIT_RECS = 4  # 每块最多列出的命中记录数
-MAX_HIT_LINES = 2  # 每条记录最多列出的命中行数
-MAX_LINE = 160  # 命中行截断
 ATTR_LONG = 10  # 较长侧 ≥ATTR_LONG 为长块：单侧整段命中即归属（整句逐字巧合可忽略）
 ATTR_MIN_SIDE = 2  # 任一侧 <ATTR_MIN_SIDE（1 字）无区分度，未定位
 ATTR_MIN_SINGLE = 6  # 纯增删块（一侧为空）：非空侧 ≥ATTR_MIN_SINGLE 才归属
@@ -81,29 +74,6 @@ def changed_vols() -> list[str]:
     return sorted(vols)
 
 
-def records_index(head: str) -> list[str]:
-    out = gitx("ls-tree", "-r", "--name-only", head, "--", RECORDS_DIR).decode("utf-8")
-    return [l for l in out.splitlines() if l.endswith(".md")]
-
-
-def record_text(head: str, path: str) -> str:
-    return gitx("show", f"{head}:{path}").decode("utf-8")
-
-
-def changed_records(base: str, head: str) -> list[str]:
-    """pin 区间内新增/修改的 record 路径。"""
-    out = gitx(
-        "log", "--format=", "--name-status", f"{base}..{head}", "--", RECORDS_DIR
-    ).decode("utf-8")
-    seen: list[str] = []
-    for l in out.splitlines():
-        if l and l[0] in "AM" and "\t" in l:
-            p = l.split("\t", 1)[1]
-            if p not in seen:
-                seen.append(p)
-    return seen
-
-
 def policy_changes(base: str, head: str) -> list[str]:
     out = gitx(
         "log",
@@ -115,31 +85,6 @@ def policy_changes(base: str, head: str) -> list[str]:
         ".agents",
     ).decode("utf-8")
     return sorted({l for l in out.splitlines() if l})
-
-
-def windows_of(old: str, new: str) -> set[str]:
-    """覆盖改动点的全部子串（新旧两侧，改动点 ±8 上下文内，长 3..17）。
-
-    检索键要同时命中两种引用形态：整句引用（键 ⊆ 记录行）与术语引用
-    （记录行中的术语 ⊆ 键）——char 级 difflib 差异常塌缩成 1-2 字
-    （空中分【裂】→空中解【体】），固定窗口两头都够不着；改为「与 diff
-    区间相交的全部子串」，术语（处置室）与整句（…在空中解体后…）自然都在内。
-    """
-    out = set()
-    sm = difflib.SequenceMatcher(a=old, b=new, autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            continue
-        # 空跨度的侧（insert 的 old 侧 / delete 的 new 侧）跳过：生成的候选
-        # 不含任何改动字符，只是纯上下文（如「在空中」），是误命中来源
-        sides = [(old, i1, i2)] if i2 > i1 else []
-        if j2 > j1:
-            sides.append((new, j1, j2))
-        for text, a, b in sides:
-            for s in range(max(0, a - 8), a + 1):
-                for e in range(max(b, s + 3), min(len(text), b + 8) + 1):
-                    out.add(text[s:e])
-    return out
 
 
 class CommitDiff(NamedTuple):
@@ -203,85 +148,19 @@ def attribute(old: str, new: str, corpus: list[CommitDiff]) -> list[CommitDiff]:
     return out
 
 
-class RecordsIndex:
-    """全部 records 的行级 trigram 倒排索引：frag → 命中行 id（语料序，逐字验证）。
-
-    search_records 每块平均数百个 frag，逐行扫全语料是 O(块×frag×行) 的三重扫描。
-    反转为「frag 定位行」：line ⊇ frag ⇒ line 含 frag 的全部 trigram，取最稀有
-    trigram 的倒排表做候选，再 `frag in line` 逐字验证（充分条件过滤，零误纳
-    零漏纳）。行 id 按（记录序, 行内序）分配，候选结果与原逐行扫描逐字节一致。
-    """
-
-    def __init__(self, corpus: dict[str, str]) -> None:
-        self.paths = list(corpus)
-        self.lines: list[str] = []
-        self.rec_of: list[int] = []
-        for i, p in enumerate(self.paths):
-            for line in corpus[p].splitlines():
-                self.rec_of.append(i)
-                self.lines.append(line)
-        postings: dict[str, list[int]] = {}
-        for lid, line in enumerate(self.lines):
-            for i in range(len(line) - 2):  # 短于 3 的行容不下任何 frag（键长 ≥3）
-                postings.setdefault(line[i : i + 3], []).append(lid)
-        self.postings = postings
-        self._cache: dict[str, tuple[int, ...]] = {}  # frag 跨块大量重复
-
-    def frag_lines(self, frag: str) -> tuple[int, ...]:
-        hit = self._cache.get(frag)
-        if hit is not None:
-            return hit
-        if len(frag) < 3:  # windows_of 不产出（键长 ≥3），防御性全扫保语义
-            hit = tuple(lid for lid, t in enumerate(self.lines) if frag in t)
-        else:
-            grams = (frag[i : i + 3] for i in range(len(frag) - 2))
-            best = min(grams, key=lambda g: len(self.postings.get(g, ())))
-            hit = tuple(
-                lid for lid in self.postings.get(best, ()) if frag in self.lines[lid]
-            )
-        if len(self._cache) < 500_000:  # 上限防长轮次内存膨胀
-            self._cache[frag] = hit
-        return hit
-
-
-def search_records(idx: RecordsIndex, frags: set[str]) -> list[str]:
-    """片段在全部 records 中的命中行（★ 预注行列表，限量截断）。
-
-    行 id 随（记录序, 行内序）单调，排序遍历与原「逐记录逐行扫描、命中
-    MAX_HIT_RECS 条记录即停」的输出逐字节一致。
-    """
-    hits, per_rec, prev = [], {}, -1
-    for lid in sorted({l for f in frags for l in idx.frag_lines(f)}):
-        r = idx.rec_of[lid]
-        if r != prev:
-            if len(per_rec) >= MAX_HIT_RECS:
-                break
-            prev = r
-        if per_rec.get(r, 0) >= MAX_HIT_LINES:
-            continue
-        per_rec[r] = per_rec.get(r, 0) + 1
-        hits.append(
-            f"★ {os.path.basename(idx.paths[r])}: {idx.lines[lid].strip()[:MAX_LINE]}"
-        )
-    return hits
-
-
-def annotate(
-    path: str, corpus: dict[str, str], commits: list[CommitDiff]
-) -> tuple[int, int]:
-    """把 commit 归属与 records 预注写回 JSON，并由 JSON 重生成 TXT。
+def annotate(path: str, commits: list[CommitDiff]) -> int:
+    """把 commit 归属预注写回 JSON，并由 JSON 重生成 TXT。
 
     commits 保留全部 8 位归属 sha；annotations 保存 TXT 去掉 ``★ `` 的
-    全部预注行（含人类可读的 commit subject、未定位与记录命中）。
+    全部预注行（含人类可读的 commit subject 与未定位）。
     """
     triage = os.path.dirname(path)
     if not os.path.exists(os.path.join(triage, "review_changes.json")):
         if not os.path.exists(path):
-            return 0, 0
+            return 0
         read_review_changes(triage)  # 旧 TXT：显式报迁移错误
     blocks = read_review_changes(triage)
-    idx = RecordsIndex(corpus)
-    n_commit, n_records = 0, 0
+    n_commit = 0
     for b in blocks:
         o_text, n_text = b["old"], b["new"]
         b["commits"] = []
@@ -301,11 +180,8 @@ def annotate(
                     )
             else:
                 b["annotations"].append("commit: 未定位")
-        hits = search_records(idx, windows_of(o_text, n_text))
-        b["annotations"].extend(h.removeprefix("★ ") for h in hits)
-        n_records += bool(hits)
     write_review_changes(triage, blocks)
-    return n_commit, n_records
+    return n_commit
 
 
 def main() -> int:
@@ -341,9 +217,6 @@ def main() -> int:
     commits = {
         v: [(s, commit_brief(s)) for s in vol_commits(base, head, v)] for v in vols
     }
-    recs = records_index(head)
-    corpus = {p: record_text(head, p) for p in recs}
-    new_recs = changed_records(base, head)
     policies = policy_changes(base, head)
     master = gitx("rev-parse", "origin/master").decode().strip()
     ahead = gitx("rev-list", "--count", f"{head}..{master}").decode().strip()
@@ -353,7 +226,7 @@ def main() -> int:
         f"# 上游上下文（index-X pin 区间 {base[:8]}..{head[:8]}"
         + (f"，tag {max(tags)}" if tags else "")
         + "）",
-        "# 记录是上游自报证据，不免检：机械比对已做，",
+        "# 提交记录是上游自报证据，不免检：机械比对已做，",
         "# 「引文→改动」的语义支持关系仍需审查者逐条判断。",
     ]
     if ahead != "0":
@@ -371,11 +244,6 @@ def main() -> int:
             w.append("")
     if not any_commit:
         w.append("（无）")
-    w += ["", f"## maintenance-records 变更（区间内 {len(new_recs)} 篇）"]
-    for p in new_recs:
-        w += [f"===== {p} =====", corpus.get(p, ""), ""]
-    w += ["", "## 全部记录索引（块级 ★ 预注的检索范围）"]
-    w += [f"- {p}" for p in recs]
     if policies:
         w += ["", "## 政策文件变更（AGENTS.md/.agents，区间内）"]
         w += [f"- {p}" for p in policies]
@@ -383,17 +251,13 @@ def main() -> int:
         f.write("\n".join(w) + "\n")
     print(
         f"上游上下文: {ctx_path}"
-        f"（{len(vols)} 卷，新 commit {sum(len(v) for v in commits.values())} 条，"
-        f"records 变更 {len(new_recs)} 篇）"
+        f"（{len(vols)} 卷，新 commit {sum(len(v) for v in commits.values())} 条）"
     )
 
-    n_commit, n_rec = annotate(
-        os.path.join(STATE_DIR, "review_changes.txt"), corpus, commit_corpus(base, head)
+    n_commit = annotate(
+        os.path.join(STATE_DIR, "review_changes.txt"), commit_corpus(base, head)
     )
-    print(
-        f"review_changes.txt: {n_commit} 块归属上游 commit，"
-        f"{n_rec} 块命中上游记录（★ 预注）"
-    )
+    print(f"review_changes.txt: {n_commit} 块归属上游 commit（★ 预注）")
     return 0
 
 
