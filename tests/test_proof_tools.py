@@ -457,6 +457,11 @@ def test_findings_supports_raw_and_stripped_cross_line_quotes(
             {
                 "file": "S1_01-01.xhtml",
                 "line": 1,
+                "quote": "甲〔A〕乙丙丁",
+            },
+            {
+                "file": "S1_01-01.xhtml",
+                "line": 1,
                 "quote": "甲A乙丙丁",
             },
         ],
@@ -464,9 +469,9 @@ def test_findings_supports_raw_and_stripped_cross_line_quotes(
 
     assert module.main() == 0
     verified = json.loads(out_path.read_text(encoding="utf-8"))
-    assert [f["quote_ok"] for f in verified] == [True, True]
-    assert [f["found_at"] for f in verified] == [2, 1]
-    assert [f["found_end"] for f in verified] == [3, 2]
+    assert [f["quote_ok"] for f in verified] == [True, True, False]
+    assert [f["found_at"] for f in verified] == [2, 1, None]
+    assert [f["found_end"] for f in verified] == [3, 2, None]
 
 
 def test_findings_cross_line_comparison_covers_every_physical_line(
@@ -491,6 +496,24 @@ def test_findings_cross_line_comparison_covers_every_physical_line(
     assert verified["quote_ok"] is True
     assert (verified["found_at"], verified["found_end"]) == (1, 2)
     assert verified["x_same"] is False
+
+
+def test_plan_chunks_marks_ruby_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = load_module(
+        "test_proof_plan_chunks_ruby",
+        "scripts/agent_proofread/plan_chunks.py",
+        monkeypatch,
+    )
+
+    assert (
+        module.strip_cn(
+            "<p><ruby>空间移动<rt>Teleport</rt></ruby>与"
+            "<ruby>普通人<rt>我们</rt></ruby></p>"
+        )
+        == "空间移动〔Teleport〕与普通人〔我们〕"
+    )
 
 
 def test_plan_chunks_uses_physical_lines_and_emits_no_empty_chunks(

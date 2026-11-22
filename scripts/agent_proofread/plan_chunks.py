@@ -2,7 +2,7 @@
 
 bw_aligned pass 卷（Y 物理行号 ≡ 日文对齐单元行号，由 check_y_jp_alignment 门禁保证）：
 每块生成一个对照文件（.triage/proofread_chunks/<卷码>/chunk-NN.txt，派生产物随轮重生成）——
-每物理行一对「L<n> CN: …／L<n> JP: …」（CN=Y 侧剥标签、ruby 注音连写；JP=对齐单元同行
+每物理行一对「L<n> CN: …／L<n> JP: …」（CN=Y 侧剥标签、ruby 注音以〔〕标出；JP=对齐单元同行
 剥标签），双空行跳过，标题行加 H、重叠上下文行加 ctx 前缀；对齐缺失或行数不等的单元
 该段只列 CN 并标注兜底。非 pass 卷维持旧形态（goal 直指 xhtml 行区间，locator 核对）。
 
@@ -44,7 +44,7 @@ CHUNK_DIR = ROOT / ".triage" / "proofread_chunks"
 
 
 def strip_cn(line: str) -> str:
-    t = re.sub(r"<rt>(.*?)</rt>", r"\1", line, flags=re.DOTALL)
+    t = re.sub(r"<rt>(.*?)</rt>", r"〔\1〕", line, flags=re.DOTALL)
     t = re.sub(r"<[^>]+>", "", t)
     return html.unescape(t)
 
@@ -169,7 +169,7 @@ def write_pair_files(
         p = out_dir / f"chunk-{i:02d}.txt"
         lines = [
             f"# chunk-{i:02d} 中日逐行对照材料（派生自 Y 产物与 ../index-jp/.cache/bw_aligned/{code}）",
-            "# 行号=Y 源文件物理行号，两侧一一对应；CN=Y 剥标签文本（ruby 注音连写在基文后，如 空间移动Teleport）；JP=日文原文同行剥标签文本",
+            "# 行号=Y 源文件物理行号，两侧一一对应；CN=Y 剥标签文本（ruby 写作 基文〔注音〕，如 空间移动〔Teleport〕）；JP=日文原文同行剥标签文本",
             "# ctx=重叠上下文（只读不报）；H=标题行（h1/h2）；双空行已跳过；CN/JP 一空一非空=漏译或行号失配信号，照常列出",
             "# findings 的 file 填各段 == 横幅里的源文件名，line 填 L 行号",
         ]
