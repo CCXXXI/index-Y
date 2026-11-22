@@ -115,7 +115,7 @@
     </navPoint>
     <navPoint id="num_18" playOrder="18">
       <navLabel>
-        <text>第三章 魔道书她静静微笑着 “Forget_me_not.”</text>
+        <text>第三章 魔道书她静静微笑着 "Forget_me_not."</text>
       </navLabel>
       <content src="OEBPS/Text/S1_01-04_Chapter3.xhtml"/>
       <navPoint id="num_19" playOrder="19">
