@@ -205,7 +205,7 @@
     </navPoint>
     <navPoint id="num_33" playOrder="33">
       <navLabel>
-        <text>第四章 休止符 Beast_Body.Human_Heart.</text>
+        <text>第四章 终止符 Beast_Body,Human_Heart.</text>
       </navLabel>
       <content src="OEBPS/Text/S1_06-07_Chapter4.xhtml"/>
       <navPoint id="num_34" playOrder="34">
