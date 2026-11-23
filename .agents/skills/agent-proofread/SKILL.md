@@ -5,7 +5,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 
 # agent 通读校对
 
-对上游已完成全卷校对、但本项目尚未校对的卷做二校：子 agent 按块通读 Y 产物，判定口径与规则落地同 proofreading。**开工选卷先查 `status.md`（各卷 AI 校对状态；文件在本 skill 目录下，即 `.agents/skills/agent-proofread/status.md`，不在仓库根）。**
+对上游已完成全卷校对、但本项目尚未校对的卷做二校：子 agent 按块通读 Y 产物，判定口径与规则落地同 proofreading。**开工选卷先查 `status.md`（各卷 AI 校对状态与成本；文件在本 skill 目录下，即 `.agents/skills/agent-proofread/status.md`，不在仓库根）。**
 
 ## 判定依据（指针，不复制进本仓库）
 
@@ -34,7 +34,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 - `uv run python scripts/agent_proofread/apply_rules.py <卷> candidates.tsv [--replace 旧串]...`：归属计数（全语料命中跨卷即报错交裁决——**裁决口径：默认顺带一并改**，各命中点逐条回原文确认同译无害后提升 _common 或逐卷落规则；仅当别卷命中不宜改时才加长旧串限本卷）、正则守卫、双模拟，全过才写 TSV。
 - 重跑 `uv run python scripts/sync/x2y.py`，`--verify-y` 终验；`git diff` 应为纯行内替换（+N/−N 相等）。
 - rules/ 与 EPUB/ 同一 commit：`fix: 校正 <卷标识>（N 处文本修订）`，body 附全量 `旧→新`。
-- **登记 `status.md`**（本 skill 目录下同名文件）：更新该卷「本项目」列为日期（校对提交号，修订处数）。提交号须指向实际校对提交；先提交 rules/EPUB，再以 docs 提交登记其提交号。
+- **登记 `status.md`**（本 skill 目录下同名文件）：更新该卷「本项目」列为日期（校对提交号，修订处数），同时按下文口径登记「成本」列。提交号须指向实际校对提交；先提交 rules/EPUB，再以 docs 提交登记其提交号与成本。
 
 ## 复核与排错
 
@@ -53,7 +53,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 - 子 agent final answer 在 live transcript 里可能被截断；合并 findings 从 hermes 根目录 `state.db` 的 `async_delegations.result_json` 提取完整 summary（结构 `{results:[{summary}]}`），勿手抄。`shared-state.db` 无此表。
 - 合并去重键必须含 category：同一行可报多条不同类发现；用 (file, line, category, quote)，不要只按 (file, line) 去重。
 - 一条规则的旧串可在卷内多行命中且双模拟照过：提交前核对 git diff 行数与规则数；多命中的行逐条回原文确认同译无害，再登记进 body。
-- 成本归集记录标注模型、块尺寸、任务数与流程形态；按卷归集会话语法见 hermes-usage-stats（parent_session_id 分批 + 批次分钟窗），供后续相近任务估算。
+- 成本随状态写入 `status.md`，不在本 SKILL 保存逐卷数值。当前默认 `k3.1-pro`、中日逐行对照、目标 1.2 万中文字/块；模型、对照形态或块尺寸变化时在成本单元格内另注。归集主会话、全部子代理与辅助任务，剔除校对后的人工追问；输入 = 未缓存输入 + cache write，输出含 reasoning。pp 按当前 Kimi 5h 费率卡估算，费率变化后按 token 重算；归集与折算方法见 hermes-usage-stats。
 - 判「不一致」前必须回 ../index-jp 查卷内各写法的日文锚点是否本身分层或带区分。已裁定分层口径（如 サイド→阵营、側→侧）不得翻案；原文自带区分即驳回。对照形态下锚点写法就在 JP 行，先看对照行再决定是否查卷内分布。
 - 合并 findings 的两个工具坑：①JP-only 关键词进 proofreading_locate 是在 X 中文语料计数，查日文锚点写法直接检索 ../index-jp 对应卷；②子 agent 不遵守 output_schema、散文与 JSON 混排时，从首个 `{` 起用 json.raw_decode 提取，不必打回重跑。
 - 校对范围不限本卷：顺带发现的别卷同一问题一并改掉。归属计数报错交裁决时默认走「跨卷一并改」，各命中点逐条回原文确认同译无害后提升 _common 或逐卷落规则；只改本卷是例外。以「系列惯用」为由不采前，先拆解命中构成，排除误命中、专名与其他语境正用。
