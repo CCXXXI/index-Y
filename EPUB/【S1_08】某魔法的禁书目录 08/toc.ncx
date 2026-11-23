@@ -91,7 +91,7 @@
     </navPoint>
     <navPoint id="num_14" playOrder="14">
       <navLabel>
-        <text>第三章 残骸隐藏之光 “Remnant”</text>
+        <text>第三章 残骸隐藏之光 「Remnant」</text>
       </navLabel>
       <content src="OEBPS/Text/S1_08-06_Chapter3.xhtml"/>
       <navPoint id="num_15" playOrder="15">
