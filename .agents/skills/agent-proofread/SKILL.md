@@ -16,8 +16,8 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 
 ### 1. 切块分派子 agent（全文对照）
 
-- `uv run python scripts/agent_proofread/plan_chunks.py <卷>`：默认把整卷正文切成不超过 10 块（软上限，可用 `--max-chunks` 调整），主区间无缝拼接、前后 ~10 行重叠上下文。包装页（Cover/Illustrations/Information 等）自动跳过。
-- **中日逐行对照文件**（bw_aligned pass 卷）：plan_chunks 为每块生成 `.triage/proofread_chunks/<卷码>/chunk-NN.txt`——每物理行一对 CN（Y 剥标签，ruby 写作「基文〔注音〕」）/JP（对齐单元同行剥标签），行号即 Y 物理行号（`check_y_jp_alignment` 门禁保证行结构一致）。派生产物，每轮开工重新生成；对齐缺失/行数不等的单元（PAIR_RULES 豁免等）段内只列 CN 并标注「※无行号对齐」；非 pass 卷自动退回旧形态（goal 直指 xhtml 行区间 + locator 核对，模板【无行号对齐卷模式】节）。块尺寸默认 1.2 万中文字符/块（对照形态输入近翻倍；未对齐卷仍 1.5 万）；大卷（>12 万字符）给 `--max-chunks 14` 维持块尺寸。并行上限读 `delegation.max_concurrent_children` 当前配置。
+- `uv run python scripts/agent_proofread/plan_chunks.py <卷>`：按目标字符数把整卷正文切块，块数随卷长增长，主区间无缝拼接、前后 ~10 行重叠上下文。包装页（Cover/Illustrations/Information 等）自动跳过。
+- **中日逐行对照文件**（bw_aligned pass 卷）：plan_chunks 为每块生成 `.triage/proofread_chunks/<卷码>/chunk-NN.txt`——每物理行一对 CN（Y 剥标签，ruby 写作「基文〔注音〕」）/JP（对齐单元同行剥标签），行号即 Y 物理行号（`check_y_jp_alignment` 门禁保证行结构一致）。派生产物，每轮开工重新生成；对齐缺失/行数不等的单元（PAIR_RULES 豁免等）段内只列 CN 并标注「※无行号对齐」；非 pass 卷自动退回旧形态（goal 直指 xhtml 行区间 + locator 核对，模板【无行号对齐卷模式】节）。块尺寸默认 1.2 万中文字符/块（对照形态输入近翻倍；未对齐卷仍 1.5 万）。并行上限读 `delegation.max_concurrent_children` 当前配置，只影响分派节奏，不改块尺寸。
 - 分派参数以 plan_chunks 输出为准直接复制：goal 用逐块 goal 行，context 与 output_schema 用末尾印出的全块共用版（context 是短指令，让子 agent 自 skill_view 加载 `templates/chapter-agent-prompt.md` 并替换 `{{VOL_PREFIX}}`）。禁止把模板全文逐块手工抄进调用。一次调用并行分派全部块。
 - 子 agent 的日文依据随对照文件下发（JP 行照抄进 jp_evidence，误译/漏译类必附）；`scripts/proofreading_locate.py` 只剩两用途：「不一致」类的全卷计数、无对齐段/失配区/非对齐卷兜底。回查词清单一次收全并批量运行，补查也用定位器，不裸 grep 逐文件翻。
 - 块尺寸与额度：按发现质量、当前模型与相近流程的实测消耗及 5h 窗余量定档，不按墙钟。块越大单块分析轮越长；无可比实测时先小批试点，预期超窗就切细或跨窗。缓存 TTL 随轮刷新，活跃子会话不会全价重付。
@@ -53,7 +53,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 - 子 agent final answer 在 live transcript 里可能被截断；合并 findings 从 hermes 根目录 `state.db` 的 `async_delegations.result_json` 提取完整 summary（结构 `{results:[{summary}]}`），勿手抄。`shared-state.db` 无此表。
 - 合并去重键必须含 category：同一行可报多条不同类发现；用 (file, line, category, quote)，不要只按 (file, line) 去重。
 - 一条规则的旧串可在卷内多行命中且双模拟照过：提交前核对 git diff 行数与规则数；多命中的行逐条回原文确认同译无害，再登记进 body。
-- 成本随状态写入 `status.md`，不在本 SKILL 保存逐卷数值。当前默认 `k3.1-pro`、中日逐行对照、目标 1.2 万中文字/块；模型、对照形态或块尺寸变化时在成本单元格内另注。归集主会话、全部子代理与辅助任务，剔除校对后的人工追问；输入 = 未缓存输入 + cache write，输出含 reasoning。pp 按当前 Kimi 5h 费率卡估算，费率变化后按 token 重算；归集与折算方法见 hermes-usage-stats。
+- 成本随状态写入 `status.md`，不在本 SKILL 保存逐卷数值。默认模型为 `k3.1-pro`；中日逐行对照卷默认目标 12000 字符/块，实际目标以 `plan_chunks` 当次输出为准。模型、对照形态或 `--target-chars` 偏离默认时在成本单元格内另注。归集主会话、全部子代理与辅助任务，剔除校对后的人工追问；输入 = 未缓存输入 + cache write，输出含 reasoning。pp 按当前 Kimi 5h 费率卡估算，费率变化后按 token 重算；归集与折算方法见 hermes-usage-stats。
 - 判「不一致」前必须回 ../index-jp 查卷内各写法的日文锚点是否本身分层或带区分。已裁定分层口径（如 サイド→阵营、側→侧）不得翻案；原文自带区分即驳回。对照形态下锚点写法就在 JP 行，先看对照行再决定是否查卷内分布。
 - 合并 findings 的两个工具坑：①JP-only 关键词进 proofreading_locate 是在 X 中文语料计数，查日文锚点写法直接检索 ../index-jp 对应卷；②子 agent 不遵守 output_schema、散文与 JSON 混排时，从首个 `{` 起用 json.raw_decode 提取，不必打回重跑。
 - 校对范围不限本卷：顺带发现的别卷同一问题一并改掉。归属计数报错交裁决时默认走「跨卷一并改」，各命中点逐条回原文确认同译无害后提升 _common 或逐卷落规则；只改本卷是例外。以「系列惯用」为由不采前，先拆解命中构成，排除误命中、专名与其他语境正用。

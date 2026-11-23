@@ -536,7 +536,30 @@ def test_plan_chunks_uses_physical_lines_and_emits_no_empty_chunks(
     assert [(p.start, p.end, p.total) for p in chunks[0].parts] == [(1, 1, 1)]
 
 
-def test_plan_chunks_documents_soft_chunk_cap(
+def test_plan_chunks_does_not_grow_target_to_limit_chunk_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+):
+    module = load_module(
+        "test_proof_plan_chunks_fixed_target",
+        "scripts/agent_proofread/plan_chunks.py",
+        monkeypatch,
+    )
+    for i in range(12):
+        (tmp_path / f"S1_01-{i + 1:02d}_Chapter{i + 1}.xhtml").write_text(
+            "<p>xx</p>\n", encoding="utf-8"
+        )
+    monkeypatch.setattr(module, "resolve_text_dir", lambda _: ("VOL", tmp_path))
+    monkeypatch.setattr(module.jp_align, "vol_code", lambda _: None)
+    monkeypatch.setattr(sys, "argv", ["plan_chunks.py", "VOL", "--target-chars", "2"])
+
+    assert module.main() == 0
+
+    assert "-> 12 块（目标 2 字符/块" in capsys.readouterr().out
+
+
+def test_plan_chunks_has_no_chunk_count_cap(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ):
     module = load_module(
@@ -551,7 +574,8 @@ def test_plan_chunks_documents_soft_chunk_cap(
 
     assert exc_info.value.code == 0
     help_text = capsys.readouterr().out
-    assert "软上限" in module.__doc__
-    assert "40000" in module.__doc__
-    assert "软上限" in help_text
-    assert "40000" in help_text
+    assert "--max-chunks" not in module.__doc__
+    assert "--max-chunks" not in help_text
+    assert "40000" not in module.__doc__
+    assert "40000" not in help_text
+    assert "--target-chars" in help_text

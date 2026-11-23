@@ -13,9 +13,8 @@ bw_aligned pass 卷（Y 物理行号 ≡ 日文对齐单元行号，由 check_y_
 - 只含正文文件（按文件名排序，内容序即顺序）；作品级包装页（Cover/Back_cover/
   Illustrations/Information/Introduction/Note/Special 等无内容序后缀）跳过；
 - 小文件合并为一块（整读）；大文件按行界切块，主区间无缝拼接，块间以
-  --overlap 行互作上下文（发现只报主区间，由提示词约束）；
-- 总块数超过 --max-chunks 时自动加大目标字符数重切；目标超过 40000 字符后停止，
-  因此 --max-chunks 是软上限而非硬上限。
+  --overlap 行互作上下文（发现只报主区间，由提示词约束）；块数随正文长度增长，
+  不通过放大目标字符数限制块数。
 
 用法：uv run python scripts/agent_proofread/plan_chunks.py <卷> [--target-chars 12000]
 """
@@ -193,12 +192,6 @@ def main() -> int:
         help="每块目标中文字符数（默认：对照卷 12000，未对齐卷 15000）",
     )
     ap.add_argument("--overlap", type=int, default=10, help="上下文重叠行数")
-    ap.add_argument(
-        "--max-chunks",
-        type=int,
-        default=10,
-        help="并行块数软上限（默认：%(default)d；目标超过 40000 字符后停止重切）",
-    )
     args = ap.parse_args()
 
     vol, text_dir = resolve_text_dir(args.vol)
@@ -208,11 +201,7 @@ def main() -> int:
         jp_align.aligned_vols(ROOT.parent / "index-jp").get(code) if code else None
     )
     target = args.target_chars or (12000 if aligned_dir else 15000)
-    while True:
-        chunks = plan(files, target)
-        if len(chunks) <= args.max_chunks or target > 40000:
-            break
-        target += 2000
+    chunks = plan(files, target)
 
     pair_paths = None
     if aligned_dir:
