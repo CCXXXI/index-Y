@@ -3,7 +3,7 @@
 bw_aligned pass 卷（Y 物理行号 ≡ 日文对齐单元行号，由 check_y_jp_alignment 门禁保证）：
 每块生成一个对照文件（.triage/proofread_chunks/<卷码>/chunk-NN.txt，派生产物随轮重生成）——
 每物理行一对「L<n> CN: …／L<n> JP: …」（CN=Y 侧剥标签、ruby 注音以〔〕标出；JP=对齐单元同行
-剥标签），双空行跳过，标题行加 H、重叠上下文行加 ctx 前缀；对齐缺失或行数不等的单元
+剥标签），双空行与空 HTML <title> 行跳过，标题行加 H、重叠上下文行加 ctx 前缀；对齐缺失或行数不等的单元
 该段只列 CN 并标注兜底。非 pass 卷维持旧形态（goal 直指 xhtml 行区间，locator 核对）。
 
 输出每块的「文件 + 校对主区间 + 字符数」与可直接粘贴的 delegate_task goal 行，
@@ -141,6 +141,8 @@ def pair_lines(part: Part, aligned_dir: Path, overlap: int) -> list[str]:
         raw = y_raw[n - 1]
         cn = re.sub(r"\s+", "", strip_cn(raw))
         jp_line = jp[n - 1] if paired else None
+        if not cn and "<title></title>" in raw:
+            continue  # 空 HTML title 是模板元数据，非正文漏译
         if not cn and not jp_line:
             continue  # 双空行无信息（CN-only 段空行同此）
         marks = []
@@ -169,7 +171,7 @@ def write_pair_files(
         lines = [
             f"# chunk-{i:02d} 中日逐行对照材料（派生自 Y 产物与 ../index-jp/.cache/bw_aligned/{code}）",
             "# 行号=Y 源文件物理行号，两侧一一对应；CN=Y 剥标签文本（ruby 写作 基文〔注音〕，如 空间移动〔Teleport〕）；JP=日文原文同行剥标签文本",
-            "# ctx=重叠上下文（只读不报）；H=标题行（h1/h2）；双空行已跳过；CN/JP 一空一非空=漏译或行号失配信号，照常列出",
+            "# ctx=重叠上下文（只读不报）；H=标题行（h1/h2）；双空行与空 HTML <title> 行已跳过；其余 CN/JP 一空一非空=漏译或行号失配信号，照常列出",
             "# findings 的 file 填各段 == 横幅里的源文件名，line 填 L 行号",
         ]
         for part in c.parts:

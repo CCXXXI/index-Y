@@ -516,6 +516,45 @@ def test_plan_chunks_marks_ruby_annotations(
     )
 
 
+def test_plan_chunks_filters_empty_html_title_from_pairs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = load_module(
+        "test_proof_plan_chunks_empty_title",
+        "scripts/agent_proofread/plan_chunks.py",
+        monkeypatch,
+    )
+    raw_lines = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        "<!DOCTYPE html>",
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title></title></head><body>',
+        '<h1 class="heading-main">第五章</h1>',
+        "<p>正文</p>",
+        "</body></html>",
+    ]
+    source = tmp_path / "S1_10-01_Chapter5.xhtml"
+    source.write_text("\n".join(raw_lines) + "\n", encoding="utf-8", newline="\n")
+    monkeypatch.setattr(module.jp_align, "unit_code", lambda _: "S1_10-01")
+    monkeypatch.setattr(
+        module.jp_align,
+        "unit_stripped_lines",
+        lambda *_: [
+            "宣言",
+            "DOCTYPE",
+            "とある魔術の禁書目録(10)",
+            "第五章",
+            "本文",
+            "終了",
+        ],
+    )
+
+    lines = module.pair_lines(module.Part(source, 1, 6, 6), tmp_path, 0)
+
+    assert not any(line.startswith("L3 ") for line in lines)
+    assert "H L4 JP: 第五章" in lines
+    assert "L5 CN: 正文" in lines
+
+
 def test_plan_chunks_uses_physical_lines_and_emits_no_empty_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
