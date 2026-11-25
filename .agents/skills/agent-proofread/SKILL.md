@@ -48,7 +48,7 @@ description: "Use when agent 通读校对：按章分派子 agent 通读整卷 Y
 - 各脚本的卷参数接受卷目录全名或卷码（如 `S1_02`，全/半角括号形态亦可），须唯一匹配。
 - 子 agent 检索要直接取带内容的输出，避免先取 count 再重跑 content；回查词宁滥勿缺，全进定位器清单。
 - 候选规则的新串按「管道终态」写：若新串仍含带上下文条件的通用规则触发模式，通用规则会在分卷规则之后再改一遍，导致双模拟终态断言失败。把触发上下文纳入旧串，并在新串直写终态。
-- 分派后读一只 live transcript 的 kickoff，核对 goal、context、output_schema 实际到达；漏指令时用 `delegate_task(action='steer')` 逐只补发，并明确保留当前块既有 findings、不得读取或复制其他子 agent 的结果。最终 summary 若跑出主区间，回该子会话 messages 恢复首次产出复核，不把跨块结果并入。
+- 分派后立即核对实际 `delegate_task` 实参：task 数必须等于计划块数，`output_schema` 不得为 `{}`；再读一只 live transcript 的 kickoff 核对 goal、context（kickoff 不回显 output_schema）。实际启动数不足时只补派未启动块；已启动块仅 schema 为空时不停止或重派，保留工作并用 verify_findings 机械复核。漏 goal/context 指令时用 `delegate_task(action='steer')` 逐只补发，并明确保留当前块既有 findings、不得读取或复制其他子 agent 的结果。最终 summary 若跑出主区间，回该子会话 messages 恢复首次产出复核，不把跨块结果并入。
 - verify_findings 大面积 jp_ok=False 时先检查引用 artifact：定位器输出的来源标注、多句「／」拼接、中文解说混入 jp_evidence 都会判负。jp_evidence 只写日文句子本身；复核时剥标注、按 ／ 切段、逐条探测核心子串。
 - 子 agent final answer 在 live transcript 里可能被截断；合并 findings 从 hermes 根目录 `state.db` 的 `async_delegations.result_json` 提取完整 summary（结构 `{results:[{summary}]}`），勿手抄。`shared-state.db` 无此表。
 - 合并去重键必须含 category：同一行可报多条不同类发现；用 (file, line, category, quote)，不要只按 (file, line) 去重。
