@@ -181,7 +181,7 @@
     </navPoint>
     <navPoint id="num_29" playOrder="29">
       <navLabel>
-        <text>第八章 神之右席与虚数学区 Fuse=KAZAKIRI.</text>
+        <text>第八章 神之右席、虚数学区与 Fuse=KAZAKIRI.</text>
       </navLabel>
       <content src="OEBPS/Text/S1_13-05_Chapter8.xhtml"/>
       <navPoint id="num_30" playOrder="30">
