@@ -37,7 +37,7 @@
     </navPoint>
     <navPoint id="num_5" playOrder="5">
       <navLabel>
-        <text>第一章 锅与肉与食欲的战争 A_Required_Thing.</text>
+        <text>第一章 锅与肉与食欲的大战术 A_Required_Thing.</text>
       </navLabel>
       <content src="OEBPS/Text/S1_14-02_Chapter1.xhtml"/>
       <navPoint id="num_6" playOrder="6">
